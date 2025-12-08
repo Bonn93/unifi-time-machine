@@ -157,6 +157,9 @@
                                 <span class="badge bg-secondary">Idle</span>
                             {{end}}
                         </p>
+                        {{if .VideoStatus.IsRunning}}
+                        <p class="mb-1"><strong>Current File:</strong> {{.VideoStatus.CurrentFile}}</p>
+                        {{end}}
                         <p class="mb-1"><strong>Last Run:</strong> {{.VideoStatus.LastRun}}</p>
                         <p class="mb-3"><strong>Error:</strong> 
                             {{if .VideoStatus.Error}}
@@ -457,7 +460,11 @@
 
                         option.value = video.Path;
 
-                        option.textContent = video.Name.charAt(0).toUpperCase() + video.Name.slice(1); // Capitalize
+                        let text = video.Name.charAt(0).toUpperCase() + video.Name.slice(1); // Capitalize
+						if (video.IsGenerating) {
+							text += " (Generating...)"
+						}
+                        option.textContent = text;
 
                         if (video.Path === firstAvailableVideo) {
 
@@ -480,9 +487,7 @@
                          downloadBtn.href = firstAvailableVideo; // Set initial download link
 
                     }
-
                    
-
                     // Add event listener to the dropdown
 
                     timelapseSelect.addEventListener('change', (event) => {

@@ -39,14 +39,18 @@ var AppConfig Config
 
 type VideoStatus struct {
 	sync.RWMutex
-	IsRunning bool
-	LastRun   *time.Time
-	Error     string
+	IsRunning           bool
+	LastRun             *time.Time
+	Error               string
+	CurrentlyGenerating string
+	CurrentFile         string
 }
 
 var videoStatus = VideoStatus{
-	IsRunning: false,
-	Error:     "",
+	IsRunning:           false,
+	Error:               "",
+	CurrentlyGenerating: "",
+	CurrentFile:         "",
 }
 
 type TimelapseConfig struct {
@@ -155,28 +159,34 @@ func handleDashboard(c *gin.Context) {
 	var availableTimelapses []gin.H
 	var firstAvailableVideo string
 	videoExists := false
+	videoStatus.RLock()
 	for _, cfg := range timelapseConfigs {
 		fileName := fmt.Sprintf("timelapse_%s.webm", cfg.Name)
 		filePath := filepath.Join(AppConfig.DataDir, fileName)
-		if fileExists(filePath) {
+		isGenerating := videoStatus.IsRunning && videoStatus.CurrentlyGenerating == cfg.Name
+
+		// A video is "available" if it exists OR is currently being generated
+		if fileExists(filePath) || isGenerating {
 			if !videoExists {
 				firstAvailableVideo = "/data/" + fileName
 				videoExists = true
 			}
 			availableTimelapses = append(availableTimelapses, gin.H{
-				"Name":     strings.ReplaceAll(cfg.Name, "_", " "),
-				"FileName": fileName,
-				"Path":     "/data/" + fileName,
+				"Name":         strings.ReplaceAll(cfg.Name, "_", " "),
+				"FileName":     fileName,
+				"Path":         "/data/" + fileName,
+				"IsGenerating": isGenerating,
 			})
 		}
 	}
 
 	// Gather all data points
-	videoStatus.RLock()
 	currentVideoStatus := gin.H{
-		"IsRunning": videoStatus.IsRunning,
-		"LastRun":   "N/A",
-		"Error":     videoStatus.Error,
+		"IsRunning":           videoStatus.IsRunning,
+		"LastRun":             "N/A",
+		"Error":               videoStatus.Error,
+		"CurrentlyGenerating": videoStatus.CurrentlyGenerating,
+		"CurrentFile":         videoStatus.CurrentFile,
 	}
 	if videoStatus.LastRun != nil {
 		currentVideoStatus["LastRun"] = videoStatus.LastRun.Format("2006-01-02 15:04:05")
@@ -485,6 +495,8 @@ func generateAllTimelapses() {
 		videoStatus.Lock()
 		videoStatus.IsRunning = false
 		videoStatus.LastRun = &currentTime
+		videoStatus.CurrentlyGenerating = ""
+		videoStatus.CurrentFile = ""
 		videoStatus.Unlock()
 		log.Println("All timelapse generations finished.")
 	}()
@@ -497,6 +509,9 @@ func generateAllTimelapses() {
 
 	for _, cfg := range timelapseConfigs {
 		log.Printf("--- Generating timelapse: %s ---", cfg.Name)
+		videoStatus.Lock()
+		videoStatus.CurrentlyGenerating = cfg.Name
+		videoStatus.Unlock()
 		snapshotsForTimelapse := filterSnapshots(allSnapshots, cfg)
 
 		if len(snapshotsForTimelapse) < 2 {
@@ -619,6 +634,9 @@ func generateTimelapse(snapshotFiles []string, outputFileName string) error {
 	listFile.Close()
 
 	// FFmpeg command
+	videoStatus.Lock()
+	videoStatus.CurrentFile = tempVideoPath
+	videoStatus.Unlock()
 	cmd := exec.Command("ffmpeg",
 		"-f", "concat",
 		"-safe", "0",
