@@ -9,7 +9,7 @@
 LOCAL_DATA_DIR="$PWD/data"
 
 # --- Docker Container Settings ---
-DOCKER_IMAGE="unifi-time-machine:latest"
+DOCKER_IMAGE="mbern/unifi-time-machine:latest"
 CONTAINER_NAME="unifi-time-machine"
 HTTP_PORT="8000" # The external port to access the web UI.
 
@@ -57,6 +57,7 @@ docker rm "$CONTAINER_NAME"
 echo "==> Starting new container '$CONTAINER_NAME' நானி..."
 docker run -d --name "$CONTAINER_NAME" \
   -p "$HTTP_PORT":8080 \
+  -e TZ="Australia/Sydney" \
   -e UFP_HOST="$UFP_HOST" \
   -e UFP_API_KEY="$UFP_API_KEY" \
   -e TARGET_CAMERA_ID="$TARGET_CAMERA_ID" \
