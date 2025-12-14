@@ -66,6 +66,7 @@ func TakeSnapshot() {
 
 	// --- New Directory Structure Logic ---
 	// Path: snapshots/YYYY-MM/DD/HH/
+	// AI did this date, I hate it... will change later
 	snapshotDir := filepath.Join(config.AppConfig.SnapshotsDir, now.Format("2006-01"), now.Format("02"), now.Format("15"))
 	if err := os.MkdirAll(snapshotDir, 0755); err != nil {
 		log.Printf("Error creating snapshot directory %s: %v", snapshotDir, err)

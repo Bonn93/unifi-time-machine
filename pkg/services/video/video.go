@@ -18,6 +18,8 @@ import (
 	"time-machine/pkg/util"
 )
 
+// heavy AI assist here, review carefully... since FFPMEG, AV1 and WEBM is tricky
+
 var (
 	PreferredVideoCodec string
 	ffmpegThreads       int
@@ -116,6 +118,8 @@ func createVideoSegment(imagePath, segmentPath string) error {
 	log.Printf("Successfully created segment: %s", segmentPath)
 	return nil
 }
+
+// used .txt extension for concat list to some issues as ffprobes was doing weird things with frame counts
 
 func concatenateVideos(existingVideoPath, newSegmentPath, outputVideoPath string) error {
 	log.Printf("Concatenating %s and %s into %s...", filepath.Base(existingVideoPath), filepath.Base(newSegmentPath), filepath.Base(outputVideoPath))

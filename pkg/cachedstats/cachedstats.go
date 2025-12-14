@@ -10,6 +10,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// CachedStats holds the cached statistics data
+// This probably will struggler and need a more robust caching solution as the app grows, larger data, or support for multiple instances, cameras etc
+
 type CachedStats struct {
 	sync.RWMutex
 	Data gin.H

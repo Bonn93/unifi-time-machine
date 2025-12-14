@@ -37,6 +37,7 @@ var params = &argon2Params{
 var db *sql.DB
 
 // InitDB initializes the database connection and creates the users table if it doesn't exist.
+// Kept simple with sqlite for now, can migrate to a more robust solution later if needed. TIL SQLite needs CGO...
 func InitDB() {
 	dbPath := filepath.Join(config.AppConfig.DataDir, "lapse.db")
 	var err error

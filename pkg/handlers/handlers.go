@@ -44,8 +44,7 @@ func HandleLoginPost(c *gin.Context) {
 		return
 	}
 
-	// For simplicity, we'll just set a signed cookie with the username.
-	// In a real application, you'd use a more robust session management.
+	// this needs to be more robust...
 	sessionToken := username + ":" + fmt.Sprintf("%d", time.Now().Unix()) // Simple token
 	c.SetCookie("session_token", sessionToken, 3600, "/", "", false, true)
 

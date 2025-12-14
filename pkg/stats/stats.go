@@ -17,6 +17,8 @@ import (
 	"time-machine/pkg/util"
 )
 
+// needs good wrapping with go routines and caching later, leverage the dB and make the UI more async for faster loads.
+
 func HandleImageStatsData() gin.H {
 	return gin.H{
 		"total_images":         GetTotalImagesCount(),

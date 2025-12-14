@@ -13,7 +13,8 @@ import (
 func Start() {
 	log.Println("Starting job worker...")
 	// This is a simple, single-threaded worker.
-	// For a more robust system, you might use a pool of workers.
+	// Will need to expand this if we do more cameras
+
 	for {
 		job, err := jobs.GetPendingJob()
 		if err != nil {
@@ -68,6 +69,7 @@ func Start() {
 		}
 
 		// Clean up the job from the database
+		// I think this will have weird issues
 		err = jobs.DeleteJob(job.ID)
 		if err != nil {
 			log.Printf("Error deleting job %d: %v", job.ID, err)

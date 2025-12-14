@@ -14,10 +14,6 @@ import (
 	"time-machine/pkg/cachedstats"
 )
 
-// --- INITIALIZATION ---
-
-
-
 func main() {
 	config.LoadConfig()
 
@@ -34,6 +30,7 @@ func main() {
 	jobs.InitJobs(database.GetDB())
 
 	// Create initial admin user if it doesn't exist
+	// Can probably make a nicer GUI and set this up and remove a cleartext password in env var 
 	adminUserExists, err := database.UserExists("admin")
 	if err != nil {
 		log.Fatalf("Failed to check if admin user exists: %v", err)
@@ -57,20 +54,3 @@ func main() {
 
 	server.StartServer()
 }
-
-
-
-// --- CORE LOGIC (Scheduler and API calls) ---
-
-
-
-
-
-
-// --- VIDEO GENERATION AND CLEANUP IMPLEMENTATION ---
-
-
-
-// --- UTILITY FUNCTIONS IMPLEMENTATION ---
-
-

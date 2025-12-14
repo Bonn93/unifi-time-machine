@@ -54,7 +54,7 @@ func LoadConfig() {
 		SnapshotIntervalSec:  getEnvAsInt("TIMELAPSE_INTERVAL", 3600),
 		VideoCronIntervalSec: getEnvAsInt("VIDEO_CRON_INTERVAL", 300),
 		VideoArchivesToKeep:  getEnvAsInt("VIDEO_ARCHIVES_TO_KEEP", 3),
-		AppKey:               getEnv("APP_KEY", ""),           // Uncommented
+		AppKey:               getEnv("APP_KEY", ""),
 		AdminPassword:        getEnv("ADMIN_PASSWORD", ""),
 		VideoQuality:         getEnv("VIDEO_QUALITY", "medium"),
 		SnapshotsDir:         getEnv("SNAPSHOTS_DIR", "snapshots"),
@@ -63,12 +63,12 @@ func LoadConfig() {
 	}
 
 	// Validate APP_KEY
-	if AppConfig.AppKey == "" { // Uncommented
+	if AppConfig.AppKey == "" {
 		log.Fatal("FATAL: APP_KEY environment variable must be set.")
 	}
-	_, err := base64.StdEncoding.DecodeString(AppConfig.AppKey) // Uncommented
-	if err != nil { // Uncommented
-		log.Fatalf("FATAL: APP_KEY is not a valid base64 encoded string: %v", err) // Uncommented
+	_, err := base64.StdEncoding.DecodeString(AppConfig.AppKey) 
+	if err != nil {
+		log.Fatalf("FATAL: APP_KEY is not a valid base64 encoded string: %v", err) 
 	}
 
 	AppConfig.SnapshotsDir = filepath.Join(AppConfig.DataDir, AppConfig.SnapshotsDir)
