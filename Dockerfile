@@ -20,7 +20,7 @@ RUN go mod download
 # Static linking is recommended for smaller, self-contained binaries on Linux
 ARG GOOS
 ARG GOARCH
-RUN CGO_ENABLED=1 GOOS=$GOOS GOARCH=$GOARCH go build -ldflags '-s -w -extldflags "-static"' -tags osusergo,netgo -o /go-timelapse ./cmd/server
+RUN CGO_ENABLED=1 GOOS=$GOOS GOARCH=$GOARCH go build -ldflags '-s -w -extldflags "-static"' -tags osusergo,netgo -o /unifi-time-machine ./cmd/server
 
 
 # --- Stage 2: Final Runtime Image ---
@@ -33,6 +33,7 @@ FROM debian:bookworm-slim
 # tzdata ensures correct timezone handling if needed
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+        dumb-init \
         ffmpeg \
         ca-certificates \
         tzdata && \
@@ -41,23 +42,15 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Copy the compiled Go binary from the builder stage
-COPY --from=builder /go-timelapse /usr/local/bin/go-timelapse
+COPY --from=builder /unifi-time-machine /usr/local/bin/unifi-time-machine
 
-# --- ASSET COPY FIXES ---
-
-# 1. Copy the HTML file
-# The Go application expects to find index.html in its working directory (`/app`).
+# --- ASSET COPY ---
 COPY web/templates/index.html .
 COPY web/templates/admin.html .
 COPY web/templates/login.html .
 COPY web/templates/error.html .
 
-# We no longer need the /app/static/ directories since CSS and JS are inlined.
 
-# --- END ASSET COPY FIXES ---
-
-# Create the data volume directory as configured in main.go
-# This is where snapshots, logs, and videos will be stored
 RUN mkdir -p /app/data
 VOLUME /app/data
 
@@ -65,4 +58,4 @@ VOLUME /app/data
 EXPOSE 8080
 
 # Run the compiled application
-ENTRYPOINT ["/usr/local/bin/go-timelapse"]
+ENTRYPOINT ["/usr/bin/dumb-init", "--", "/usr/local/bin/unifi-time-machine"]
