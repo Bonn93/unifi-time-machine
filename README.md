@@ -2,6 +2,10 @@
 
 UniFi Time-Machine is a Go application that creates beautiful timelapse videos from your UniFi Protect cameras. It provides a web interface to view the latest snapshots, watch generated timelapses, and monitor the system status.
 
+## Web Console
+<img width="1912" height="1987" alt="image" src="https://github.com/user-attachments/assets/a5313036-24fd-41f3-bd46-eed4b5edbcfd" />
+
+
 ## Features
 
 -   **Automatic Timelapse Generation**: Periodically generates timelapse videos from your UniFi Protect camera snapshots.
