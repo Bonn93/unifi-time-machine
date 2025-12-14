@@ -110,5 +110,11 @@ This is an early release, im still tweaking and deciding how ffmpeg, encoders et
 
 I have also not done any capacity planning or much storage optimisation. 
 
+## Next Features
+* GPU Support, perhaps on an Intel GPU because I've never done that.
+* More than one camera in your Protect app?
+* Cloud Backups & Tiered Storage for Edge/IOT deployments
+* Public URL Sharing
+
 ## Contributing
 I welcome any contributions or ideas.
