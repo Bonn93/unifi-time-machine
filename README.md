@@ -18,11 +18,7 @@ There are several ways to run UniFi Time-Machine. The easiest way is to use Dock
 
 This is the recommended way to run the application, as it simplifies the management of the container and its configuration.
 
-1.  **Create a `.env` file**: Copy the provided `.env` file and fill in the values for your environment.
-
-    ```bash
-    cp .env.example .env
-    ```
+1.  **Create a `.env` file**: Modify the provided `.env` file and fill in the values for your environment.
 
     At a minimum, you must set `UFP_API_KEY`, `TARGET_CAMERA_ID`, `APP_KEY`, and `ADMIN_PASSWORD`.
 
@@ -38,7 +34,7 @@ This is the recommended way to run the application, as it simplifies the managem
     docker-compose up -d
     ```
 
-3.  **Access the web UI**: The web UI will be available at `http://localhost:8000` (or the port you specified in `HTTP_PORT`).
+3.  **Access the web UI**: The web UI will be available at `http://localhost:8000` (or the port you specified in `HTTP_PORT`). Login with the set Admin credentials.
 
 ### Running with `start.sh`
 

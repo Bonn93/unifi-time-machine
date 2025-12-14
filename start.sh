@@ -86,10 +86,11 @@ mkdir -p "$LOCAL_DATA_DIR"
 
 echo "==> Stopping and removing any existing container named '$CONTAINER_NAME'..."
 docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
-docker rm "$CONTAINER_NAME" >/dev/null 2>
+docker rm "$CONTAINER_NAME" >/dev/null 2>&1
 
 echo "==> Starting new container '$CONTAINER_NAME'..."
 docker run -d --name "$CONTAINER_NAME" \
+  --restart=always \
   -p "$HTTP_PORT":8080 \
   -e TZ="Australia/Sydney" \
   -e APP_KEY="$APP_KEY" \
