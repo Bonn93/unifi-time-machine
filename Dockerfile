@@ -1,20 +1,26 @@
 # --- Stage 1: Builder (Using a Debian-based Go image) ---
 # golang:1.22-bullseye is a good choice for a stable build environment
-FROM golang:1.25-bookworm AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS builder
+
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+RUN echo "I am running on $BUILDPLATFORM, building for $TARGETPLATFORM"
 
 WORKDIR /app
 
 # Copy dependency files and download modules
 COPY go.mod .
 COPY go.sum .
+COPY cmd cmd
+COPY pkg pkg
+RUN go mod tidy
 RUN go mod download
-
-# Copy all source files (main.go and index.html)
-COPY . .
 
 # Build the final application binary
 # Static linking is recommended for smaller, self-contained binaries on Linux
-RUN CGO_ENABLED=0 go build -ldflags "-s -w" -o /go-timelapse main.go
+ARG GOOS
+ARG GOARCH
+RUN CGO_ENABLED=1 GOOS=$GOOS GOARCH=$GOARCH go build -ldflags '-s -w -extldflags "-static"' -tags osusergo,netgo -o /go-timelapse ./cmd/server
 
 
 # --- Stage 2: Final Runtime Image ---
@@ -41,7 +47,10 @@ COPY --from=builder /go-timelapse /usr/local/bin/go-timelapse
 
 # 1. Copy the HTML file
 # The Go application expects to find index.html in its working directory (`/app`).
-COPY index.html .
+COPY web/templates/index.html .
+COPY web/templates/admin.html .
+COPY web/templates/login.html .
+COPY web/templates/error.html .
 
 # We no longer need the /app/static/ directories since CSS and JS are inlined.
 

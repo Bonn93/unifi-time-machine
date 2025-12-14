@@ -1,0 +1,14 @@
+# ignore data dir
+data/
+
+*.txt
+*.log
+# ignore build artifacts
+build/
+dist/
+
+*.webm
+*.mp4
+*.jpg
+*.jpeg
+

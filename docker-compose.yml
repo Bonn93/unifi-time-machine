@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  unifi-time-machine:
+    image: mbern/unifi-time-machine:latest
+    container_name: unifi-time-machine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-8000}:8080"
+    environment:
+      - TZ=${TZ:-Australia/Sydney}
+      - APP_KEY=${APP_KEY}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - UFP_HOST=${UFP_HOST}
+      - UFP_API_KEY=${UFP_API_KEY}
+      - TARGET_CAMERA_ID=${TARGET_CAMERA_ID}
+      - TIMELAPSE_INTERVAL=${TIMELAPSE_INTERVAL:-60}
+      - VIDEO_CRON_INTERVAL=${VIDEO_CRON_INTERVAL:-600}
+      - VIDEO_ARCHIVES_TO_KEEP=${VIDEO_ARCHIVES_TO_KEEP:-3}
+      - VIDEO_QUALITY=${VIDEO_QUALITY:-medium}
+      - SNAPSHOTS_DIR=${SNAPSHOTS_DIR:-snapshots}
+      - GALLERY_DIR=${GALLERY_DIR:-gallery}
+      - FFMPEG_LOG_PATH=${FFMPEG_LOG_PATH:-ffmpeg_log.txt}
+      - GIN_MODE=${GIN_MODE:-release}
+    volumes:
+      - ./data:/app/data
