@@ -2,6 +2,10 @@
 
 UniFi Time-Machine is a Go application that creates beautiful timelapse videos from your UniFi Protect cameras. It provides a web interface to view the latest snapshots, watch generated timelapses, and monitor the system status.
 
+## Web UI
+
+Web Interface:
+
 ## Features
 
 -   **Automatic Timelapse Generation**: Periodically generates timelapse videos from your UniFi Protect camera snapshots.
@@ -34,7 +38,7 @@ This is the recommended way to run the application, as it simplifies the managem
     docker-compose up -d
     ```
 
-3.  **Access the web UI**: The web UI will be available at `http://localhost:8000` (or the port you specified in `HTTP_PORT`). Login with the set Admin credentials.
+3.  **Access the web UI**: The web UI will be available at `http://localhost:8000` (or the port you specified in `HTTP_PORT`). Login with `admin` as the user, and the password you defined in the startup variables. 
 
 ### Running with `start.sh`
 
