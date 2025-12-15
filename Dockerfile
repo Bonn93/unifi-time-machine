@@ -39,6 +39,20 @@ RUN apt-get update && \
         tzdata && \
     rm -rf /var/lib/apt/lists/*
 
+# Make appuser with UID and GID 1000
+RUN groupadd -g 1000 appuser
+RUN useradd -m -u 1000 -g 1000 -s /bin/bash appuser
+
+# Create application data directory and set as a volume
+RUN mkdir -p /app/data
+VOLUME /app/data
+
+# set permissions
+RUN chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
 WORKDIR /app
 
 # Copy the compiled Go binary from the builder stage
