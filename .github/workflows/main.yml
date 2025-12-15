@@ -32,8 +32,3 @@ jobs:
           push: true
           tags: |
             mbern/unifi-time-machine:latest
-            mbern/unifi-time-machine:${{ steps.date.outputs.date }}
-      
-      - name: Get current date
-        id: date
-        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
