@@ -72,6 +72,7 @@ func createVideoSegment(imagePath, segmentPath string) error {
 	if PreferredVideoCodec == "libsvtav1" {
 		cmd = exec.Command("ffmpeg",
 			"-loop", "1",
+			"-color_range", "2", // Specify full range for input JPEG
 			"-i", imagePath,
 			"-t", "0.0333", // Duration for a single frame at 30 FPS
 			"-r", "30", // Set segment framerate to 30
@@ -82,6 +83,7 @@ func createVideoSegment(imagePath, segmentPath string) error {
 			"-keyint_min", "1",
 			"-crf", config.AppConfig.GetCRFValue(), // Matched with regenerateFullTimelapse
 			"-pix_fmt", "yuv420p", // Ensure consistent pixel format
+			"-color_range", "1", // Explicitly set limited range for output
 			"-an",
 			"-f", "webm",
 			"-y", segmentPath,
@@ -89,6 +91,7 @@ func createVideoSegment(imagePath, segmentPath string) error {
 	} else {
 		cmd = exec.Command("ffmpeg",
 			"-loop", "1",
+			"-color_range", "2", // Specify full range for input JPEG
 			"-i", imagePath,
 			"-t", "0.0333", // Duration for a single frame at 30 FPS
 			"-r", "30", // Set segment framerate to 30
@@ -98,6 +101,7 @@ func createVideoSegment(imagePath, segmentPath string) error {
 			"-keyint_min", "1",
 			"-crf", config.AppConfig.GetCRFValue(), // Matched with regenerateFullTimelapse
 			"-pix_fmt", "yuv420p", // Ensure consistent pixel format
+			"-color_range", "1", // Explicitly set limited range for output
 			"-an",
 			"-f", "webm",
 			"-y", segmentPath,
@@ -157,6 +161,7 @@ func concatenateVideos(existingVideoPath, newSegmentPath, outputVideoPath string
 		"-crf", config.AppConfig.GetCRFValue(),
 		"-pix_fmt", "yuv420p",
 		"-r", "30", // Set output framerate to 30 FPS
+		"-color_range", "1", // Explicitly set limited range for output
 		"-y", tempOutput,
 	)
 	cmd.Dir = config.AppConfig.DataDir
@@ -428,12 +433,14 @@ func regenerateFullTimelapse(snapshotFiles []string, outputFileName string) erro
 	cmd := exec.Command("ffmpeg",
 		"-f", "concat",
 		"-safe", "0",
+		"-color_range", "2", // Specify full range for input JPEGs
 		"-i", listFileName,
 		"-r", "30", // Set output framerate to 30 FPS
 		"-c:v", PreferredVideoCodec, // Use the detected preferred codec
 		"-b:v", "0",          // Use CRF for quality
 		"-crf", config.AppConfig.GetCRFValue(),         // Good balance of quality and size
 		"-pix_fmt", "yuv420p",
+		"-color_range", "1", // Explicitly set limited range for output
 		"-y", "temp_"+outputFileName,
 	)
 	cmd.Dir = config.AppConfig.DataDir
