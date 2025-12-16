@@ -63,6 +63,7 @@ COPY web/templates/index.html .
 COPY web/templates/admin.html .
 COPY web/templates/login.html .
 COPY web/templates/error.html .
+COPY web/templates/log.html .
 
 
 RUN mkdir -p /app/data

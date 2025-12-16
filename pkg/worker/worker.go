@@ -51,6 +51,8 @@ func Start() {
 			video.CleanupSnapshots()
 		case "cleanup_videos":
 			video.CleanOldVideos()
+		case "cleanup_logs":
+			video.CleanupLogFiles()
 		default:
 			jobErr = fmt.Errorf("unknown job type: %s", job.JobType)
 			log.Println(jobErr)

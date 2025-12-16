@@ -22,7 +22,7 @@ func SetupRouter() *gin.Engine {
 			return template.JS(j), err
 		},
 	})
-	r.LoadHTMLFiles("index.html", "admin.html", "login.html", "error.html")
+	r.LoadHTMLFiles("index.html", "admin.html", "login.html", "error.html", "log.html")
 
 	// Login page route (GET) - serves the login HTML
 	r.GET("/login", handlers.HandleLoginGet)
