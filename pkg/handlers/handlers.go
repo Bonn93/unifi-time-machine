@@ -1,14 +1,26 @@
 package handlers
 
 import (
+
 	"fmt"
+
 	"net/http"
+
 	"os"
+
 	"path/filepath"
+
+	"sort"
+
 	"strings"
+
 	"time"
 
+
+
 	"github.com/gin-gonic/gin"
+
+
 
 	"time-machine/pkg/cachedstats"
 	"time-machine/pkg/config"
@@ -129,18 +141,60 @@ func HandleForceGenerate(c *gin.Context) {
 }
 
 func HandleLog(c *gin.Context) {
-	content, err := os.ReadFile(config.AppConfig.FFmpegLogPath)
+	logFiles, err := filepath.Glob(filepath.Join(config.AppConfig.DataDir, "ffmpeg_log_*.txt"))
 	if err != nil {
-		// Attempt to create an empty log file if it doesn't exist
+		c.String(http.StatusInternalServerError, "Error finding log files: %v", err)
+		return
+	}
+
+	if len(logFiles) == 0 {
+		c.HTML(http.StatusOK, "log.html", gin.H{
+			"Message": "No log files found.",
+		})
+		return
+	}
+
+	// Sort files by name to get the most recent one last
+	sort.Sort(sort.Reverse(sort.StringSlice(logFiles)))
+
+	var logDates []string
+	for _, file := range logFiles {
+		// Extract YYYY-MM-DD from the filename
+		name := filepath.Base(file)
+		dateStr := strings.TrimSuffix(strings.TrimPrefix(name, "ffmpeg_log_"), ".txt")
+		logDates = append(logDates, dateStr)
+	}
+
+	// Determine which log to display
+	selectedDate := c.Query("date")
+	var logToShowPath string
+	if selectedDate != "" {
+		logToShowPath = filepath.Join(config.AppConfig.DataDir, fmt.Sprintf("ffmpeg_log_%s.txt", selectedDate))
+	} else {
+		logToShowPath = logFiles[0] // Default to the latest
+		selectedDate = logDates[0]
+	}
+
+	content, err := os.ReadFile(logToShowPath)
+	if err != nil {
 		if os.IsNotExist(err) {
-			c.String(http.StatusOK, "FFmpeg log file does not exist yet.")
+			c.HTML(http.StatusNotFound, "log.html", gin.H{
+				"Message":      fmt.Sprintf("Log file for date %s not found.", selectedDate),
+				"AvailableDates": logDates,
+			})
 			return
 		}
 		c.String(http.StatusInternalServerError, "Error reading log file: %v", err)
 		return
 	}
-	// Use pre-formatted text for log output
-	c.String(http.StatusOK, "<pre>%s</pre>", string(content))
+
+	user, _ := c.Get("user")
+	c.HTML(http.StatusOK, "log.html", gin.H{
+		"User":           user.(*models.User),
+		"LogContent":     string(content),
+		"AvailableDates": logDates,
+		"SelectedDate":   selectedDate,
+	})
 }
 
 func HandleSystemStats(c *gin.Context) {

@@ -72,6 +72,7 @@ func createVideoSegment(imagePath, segmentPath string) error {
 	if PreferredVideoCodec == "libsvtav1" {
 		cmd = exec.Command("ffmpeg",
 			"-loop", "1",
+			"-color_range", "2", // Specify full range for input JPEG
 			"-i", imagePath,
 			"-t", "0.0333", // Duration for a single frame at 30 FPS
 			"-r", "30", // Set segment framerate to 30
@@ -82,6 +83,7 @@ func createVideoSegment(imagePath, segmentPath string) error {
 			"-keyint_min", "1",
 			"-crf", config.AppConfig.GetCRFValue(), // Matched with regenerateFullTimelapse
 			"-pix_fmt", "yuv420p", // Ensure consistent pixel format
+			"-color_range", "1", // Explicitly set limited range for output
 			"-an",
 			"-f", "webm",
 			"-y", segmentPath,
@@ -89,6 +91,7 @@ func createVideoSegment(imagePath, segmentPath string) error {
 	} else {
 		cmd = exec.Command("ffmpeg",
 			"-loop", "1",
+			"-color_range", "2", // Specify full range for input JPEG
 			"-i", imagePath,
 			"-t", "0.0333", // Duration for a single frame at 30 FPS
 			"-r", "30", // Set segment framerate to 30
@@ -98,13 +101,14 @@ func createVideoSegment(imagePath, segmentPath string) error {
 			"-keyint_min", "1",
 			"-crf", config.AppConfig.GetCRFValue(), // Matched with regenerateFullTimelapse
 			"-pix_fmt", "yuv420p", // Ensure consistent pixel format
+			"-color_range", "1", // Explicitly set limited range for output
 			"-an",
 			"-f", "webm",
 			"-y", segmentPath,
 		)
 	}
 
-	logFile, err := os.OpenFile(config.AppConfig.FFmpegLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logFile, err := os.OpenFile(config.GetFFmpegLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open FFmpeg log file: %w", err)
 	}
@@ -157,11 +161,12 @@ func concatenateVideos(existingVideoPath, newSegmentPath, outputVideoPath string
 		"-crf", config.AppConfig.GetCRFValue(),
 		"-pix_fmt", "yuv420p",
 		"-r", "30", // Set output framerate to 30 FPS
+		"-color_range", "1", // Explicitly set limited range for output
 		"-y", tempOutput,
 	)
 	cmd.Dir = config.AppConfig.DataDir
 
-	logFile, err := os.OpenFile(config.AppConfig.FFmpegLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logFile, err := os.OpenFile(config.GetFFmpegLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open FFmpeg log file: %w", err)
 	}
@@ -229,6 +234,9 @@ func EnqueueTimelapseJobs() {
 	}
 	if _, err := jobs.CreateJob("cleanup_videos", nil); err != nil {
 		log.Printf("Error enqueuing cleanup_videos job: %v", err)
+	}
+	if _, err := jobs.CreateJob("cleanup_logs", nil); err != nil {
+		log.Printf("Error enqueuing cleanup_logs job: %v", err)
 	}
 }
 
@@ -428,18 +436,20 @@ func regenerateFullTimelapse(snapshotFiles []string, outputFileName string) erro
 	cmd := exec.Command("ffmpeg",
 		"-f", "concat",
 		"-safe", "0",
+		"-color_range", "2", // Specify full range for input JPEGs
 		"-i", listFileName,
 		"-r", "30", // Set output framerate to 30 FPS
 		"-c:v", PreferredVideoCodec, // Use the detected preferred codec
 		"-b:v", "0",          // Use CRF for quality
 		"-crf", config.AppConfig.GetCRFValue(),         // Good balance of quality and size
 		"-pix_fmt", "yuv420p",
+		"-color_range", "1", // Explicitly set limited range for output
 		"-y", "temp_"+outputFileName,
 	)
 	cmd.Dir = config.AppConfig.DataDir
 
 	// Capture FFmpeg output to main log
-	logFile, err := os.OpenFile(config.AppConfig.FFmpegLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logFile, err := os.OpenFile(config.GetFFmpegLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
@@ -553,6 +563,44 @@ func CleanOldVideos() {
 				log.Printf("Error removing old video archive %s: %v", fileName, err)
 			}
 		}
-		log.Printf("Finished cleanup for %s. Removed %d archive(s).", cfg.Name, len(filesToDelete))
-	}
-}
+				log.Printf("Finished cleanup for %s. Removed %d archive(s).", cfg.Name, len(filesToDelete))
+			}
+		}
+		
+		func CleanupLogFiles() {
+			log.Println("Starting log file cleanup...")
+			files, err := filepath.Glob(filepath.Join(config.AppConfig.DataDir, "ffmpeg_log_*.txt"))
+			if err != nil {
+				log.Printf("Error finding log files for cleanup: %v", err)
+				return
+			}
+		
+			retentionDuration := 7 * 24 * time.Hour
+			cutoff := time.Now().Add(-retentionDuration)
+			filesToDelete := 0
+		
+			for _, file := range files {
+				name := filepath.Base(file)
+				dateStr := strings.TrimSuffix(strings.TrimPrefix(name, "ffmpeg_log_"), ".txt")
+				fileDate, err := time.Parse("2006-01-02", dateStr)
+				if err != nil {
+					log.Printf("Warning: could not parse date from log file %s: %v", name, err)
+					continue
+				}
+		
+				if fileDate.Before(cutoff) {
+					if err := os.Remove(file); err != nil {
+						log.Printf("Warning: failed to remove log file %s: %v", file, err)
+					} else {
+						filesToDelete++
+					}
+				}
+			}
+		
+			if filesToDelete > 0 {
+				log.Printf("Log file cleanup complete. Removed %d old log(s).", filesToDelete)
+			} else {
+				log.Println("No old log files to clean up.")
+			}
+		}
+		

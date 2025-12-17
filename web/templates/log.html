@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FFmpeg Logs</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding: 1rem;
+        }
+        .log-content {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: .25rem;
+            padding: 1rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <h1 class="mb-4">FFmpeg Logs</h1>
+
+        {{ if .AvailableDates }}
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <form id="log-date-form" action="/log" method="get">
+                        <div class="input-group">
+                            <label class="input-group-text" for="log-date-select">Select Log Date:</label>
+                            <select class="form-select" id="log-date-select" name="date" onchange="this.form.submit()">
+                                {{ range .AvailableDates }}
+                                    <option value="{{ . }}" {{ if eq . $.SelectedDate }}selected{{ end }}>{{ . }}</option>
+                                {{ end }}
+                            </select>
+                        </div>
+                    </form>
+                </div>
+                <div class="col-md-8 text-md-end">
+                    <a href="/" class="btn btn-primary">Back to Dashboard</a>
+                </div>
+            </div>
+
+            <div class="log-content">
+                <pre>{{ .LogContent }}</pre>
+            </div>
+        {{ else }}
+            <div class="alert alert-info">
+                {{ if .Message }}
+                    {{ .Message }}
+                {{ else }}
+                    No FFmpeg log files found.
+                {{ end }}
+            </div>
+            <a href="/" class="btn btn-primary">Back to Dashboard</a>
+        {{ end }}
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

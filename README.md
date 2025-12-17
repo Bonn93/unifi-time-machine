@@ -18,6 +18,15 @@ UniFi Time-Machine is a Go application that creates beautiful timelapse videos f
 
 There are several ways to run UniFi Time-Machine. The easiest way is to use Docker.
 
+### Versions
+Versions are linked to Git Tags on this repo such as `v0.0.1` and pushed to `Dockerhub`. Other tags of interest;
+
+- dev ( latest build on dev branches )
+- latest ( builds off main branch )
+- tags eg: `v1.2.3` ( recommended )
+
+From the initial release, a security update was made to the container `user` which is now `appuser` with a UID/GID of `1000`, this may break your existing database on disk and require a `chown` to fix permissions. See release notes for details. 
+
 ### Running with Docker Compose (Recommended)
 
 This is the recommended way to run the application, as it simplifies the management of the container and its configuration.
