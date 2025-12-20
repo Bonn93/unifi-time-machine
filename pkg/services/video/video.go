@@ -162,6 +162,7 @@ func concatenateVideos(existingVideoPath, newSegmentPath, outputVideoPath string
 		"-safe", "0",
 		"-i", concatListPath,
 		"-c", "copy", // Stream copy, not re-encode
+		"-threads", fmt.Sprintf("%d", ffmpegThreads),
 		"-y", tempOutput,
 	)
 	cmd.Dir = config.AppConfig.DataDir
@@ -243,6 +244,7 @@ func EnqueueTimelapseJobs() {
 
 func GenerateSingleTimelapse(timelapseName string) error {
 	log.Printf("--- Processing timelapse: %s ---", timelapseName)
+	detectFFmpegCapabilities()
 
 	var cfg models.TimelapseConfig
 	for _, c := range models.TimelapseConfigsData {
@@ -319,9 +321,6 @@ func GenerateSingleTimelapse(timelapseName string) error {
 				return fmt.Errorf("error concatenating for %s: %w", finalVideoPath, err)
 			}
 
-			if err := os.Remove(finalVideoPath); err != nil {
-				log.Printf("WARNING: Failed to remove old video %s during update: %v", finalVideoPath, err)
-			}
 			if err := os.Rename(tempConcatenatedVideoPath, finalVideoPath); err != nil {
 				return fmt.Errorf("error renaming new video %s to %s: %w", tempConcatenatedVideoPath, finalVideoPath, err)
 			}
@@ -440,6 +439,7 @@ func regenerateFullTimelapse(snapshotFiles []string, outputFileName string) erro
 		"-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
 		"-r", "30", // Set output framerate to 30 FPS
 		"-c:v", PreferredVideoCodec, // Use the detected preferred codec
+		"-threads", fmt.Sprintf("%d", ffmpegThreads),
 		"-b:v", "0", // Use CRF for quality
 		"-crf", config.AppConfig.GetCRFValue(), // Good balance of quality and size
 		"-y", "temp_"+outputFileName,
