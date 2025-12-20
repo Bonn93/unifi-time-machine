@@ -17,6 +17,41 @@ import (
 	"time-machine/pkg/config"
 )
 
+var useHighQuality bool
+
+// InitSnapshotSettings checks camera capabilities and configuration to decide whether to use high-quality snapshots.
+func InitSnapshotSettings() {
+	log.Println("Initializing snapshot settings...")
+
+	switch strings.ToLower(config.AppConfig.HQSnapParams) {
+	case "true":
+		useHighQuality = true
+		log.Println("High Quality Snapshots enabled by environment override (HQSNAP=true).")
+	case "false":
+		useHighQuality = false
+		log.Println("High Quality Snapshots disabled by environment override (HQSNAP=false).")
+	default: // "auto" or empty
+		log.Println("HQSNAP is set to 'auto' or unset. Checking camera capabilities...")
+		cameraStatus := GetCameraStatus()
+		if err, ok := cameraStatus["error"]; ok {
+			log.Printf("Cannot determine camera capabilities, API error: %v", err)
+			useHighQuality = false
+		} else if featureFlags, ok := cameraStatus["featureFlags"].(map[string]interface{}); ok {
+			if supported, ok := featureFlags["supportFullHdSnapshot"].(bool); ok {
+				useHighQuality = supported
+				log.Printf("Camera capability 'supportFullHdSnapshot' is %v.", supported)
+			} else {
+				log.Println("Could not find 'supportFullHdSnapshot' boolean in featureFlags. Defaulting to standard quality.")
+				useHighQuality = false
+			}
+		} else {
+			log.Println("Could not determine 'featureFlags' from camera status. Defaulting to standard quality.")
+			useHighQuality = false
+		}
+	}
+	log.Printf("High Quality Snapshots enabled: %v", useHighQuality)
+}
+
 // --- CORE LOGIC (Scheduler and API calls) ---
 
 func StartSnapshotScheduler() {
@@ -33,6 +68,9 @@ func TakeSnapshot() {
 	}
 
 	apiURL := fmt.Sprintf("%s/proxy/protect/integration/v1/cameras/%s/snapshot", config.AppConfig.UFPHost, config.AppConfig.TargetCameraID)
+	if useHighQuality {
+		apiURL += "?highQuality=true"
+	}
 
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},

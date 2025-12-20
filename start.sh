@@ -9,7 +9,8 @@
 LOCAL_DATA_DIR="$PWD/data"
 
 # --- Docker Container Settings ---
-DOCKER_IMAGE="mbern/unifi-time-machine:latest"
+TAG="latest"
+DOCKER_IMAGE="mbern/unifi-time-machine:$TAG"
 CONTAINER_NAME="unifi-time-machine"
 HTTP_PORT="8000" # The external port to access the web UI.
 
@@ -23,7 +24,7 @@ UFP_HOST="192.168.1.1"
 
 # The ID of the camera you want to capture snapshots from.
 # You can find this in the URL when viewing the camera in the Protect web UI.
-TARGET_CAMERA_ID="68ccb308002eec03e40320d9"
+TARGET_CAMERA_ID="68cbac880021ec03e401c50e"
 
 
 # --- Authentication Settings ---
@@ -48,6 +49,13 @@ VIDEO_CRON_INTERVAL="600"
 # The quality of the generated video.
 # Options: low, medium, high, ultra
 VIDEO_QUALITY="ultra"
+
+# --- High-Quality Snapshot Settings ---
+# Determines if high-quality snapshots are used.
+# "true": Always use high-quality snapshots.
+# "false": Never use high-quality snapshots.
+# "auto": (Default) Check camera capability at startup and use if supported.
+HQSNAP="auto"
 
 
 # --- Data Retention and Cleanup Settings ---
@@ -106,6 +114,7 @@ docker run -d --name "$CONTAINER_NAME" \
   -e GALLERY_DIR="$GALLERY_DIR" \
   -e FFMPEG_LOG_PATH="$FFMPEG_LOG_PATH" \
   -e GIN_MODE="$GIN_MODE" \
+  -e HQSNAP="$HQSNAP" \
   -v "$LOCAL_DATA_DIR":/app/data \
   "$DOCKER_IMAGE"
 

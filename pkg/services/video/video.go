@@ -68,40 +68,44 @@ func createVideoSegment(imagePath, segmentPath string) error {
 
 	// FFmpeg command to create a single-frame WebM segment.
 	// Parameters are aligned with regenerateFullTimelapse to ensure concat compatibility.
+	// We use a video filter to force the conversion from JPEG (Full Range) to Video (TV Range)
+	// scale=out_color_matrix=bt709:out_range=tv forces the math conversion.
+	// format=yuv420p ensures the pixel format is compatible with WebM/AV1.
+	videoFilter := "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p"
+
 	var cmd *exec.Cmd
 	if PreferredVideoCodec == "libsvtav1" {
 		cmd = exec.Command("ffmpeg",
+			"-hide_banner",
+			"-loglevel", "error",
 			"-loop", "1",
-			"-color_range", "2", // Specify full range for input JPEG
 			"-i", imagePath,
-			"-t", "0.0333", // Duration for a single frame at 30 FPS
-			"-r", "30", // Set segment framerate to 30
+			"-t", "0.0333", // 1 frame at 30fps
+			"-vf", videoFilter, // <--- CRITICAL FIX
 			"-c:v", PreferredVideoCodec,
 			"-preset", "8",
 			"-threads", fmt.Sprintf("%d", ffmpegThreads),
-			"-g", "1",
+			"-g", "1", // Force Intra frame
 			"-keyint_min", "1",
-			"-crf", config.AppConfig.GetCRFValue(), // Matched with regenerateFullTimelapse
-			"-pix_fmt", "yuv420p", // Ensure consistent pixel format
-			"-color_range", "1", // Explicitly set limited range for output
+			"-crf", config.AppConfig.GetCRFValue(),
 			"-an",
 			"-f", "webm",
 			"-y", segmentPath,
 		)
 	} else {
+		// Apply the same fix to the fallback block
 		cmd = exec.Command("ffmpeg",
+			"-hide_banner",
+			"-loglevel", "error",
 			"-loop", "1",
-			"-color_range", "2", // Specify full range for input JPEG
 			"-i", imagePath,
-			"-t", "0.0333", // Duration for a single frame at 30 FPS
-			"-r", "30", // Set segment framerate to 30
+			"-t", "0.0333",
+			"-vf", videoFilter, // <--- CRITICAL FIX
 			"-c:v", PreferredVideoCodec,
 			"-threads", fmt.Sprintf("%d", ffmpegThreads),
 			"-g", "1",
 			"-keyint_min", "1",
-			"-crf", config.AppConfig.GetCRFValue(), // Matched with regenerateFullTimelapse
-			"-pix_fmt", "yuv420p", // Ensure consistent pixel format
-			"-color_range", "1", // Explicitly set limited range for output
+			"-crf", config.AppConfig.GetCRFValue(),
 			"-an",
 			"-f", "webm",
 			"-y", segmentPath,
@@ -151,17 +155,13 @@ func concatenateVideos(existingVideoPath, newSegmentPath, outputVideoPath string
 
 	tempOutput := filepath.Base(outputVideoPath)
 
-	// Re-encode instead of stream copying for robustness. This avoids errors if segments have minor differences.
+	// Use stream copy (-c copy) for concatenation. This is extremely fast and avoids re-encoding.
+	// It requires that all segments are perfectly compatible, which our createVideoSegment function now ensures.
 	cmd := exec.Command("ffmpeg",
 		"-f", "concat",
 		"-safe", "0",
 		"-i", concatListPath,
-		"-c:v", PreferredVideoCodec,
-		"-b:v", "0",
-		"-crf", config.AppConfig.GetCRFValue(),
-		"-pix_fmt", "yuv420p",
-		"-r", "30", // Set output framerate to 30 FPS
-		"-color_range", "1", // Explicitly set limited range for output
+		"-c", "copy", // Stream copy, not re-encode
 		"-y", tempOutput,
 	)
 	cmd.Dir = config.AppConfig.DataDir
@@ -436,14 +436,12 @@ func regenerateFullTimelapse(snapshotFiles []string, outputFileName string) erro
 	cmd := exec.Command("ffmpeg",
 		"-f", "concat",
 		"-safe", "0",
-		"-color_range", "2", // Specify full range for input JPEGs
 		"-i", listFileName,
+		"-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
 		"-r", "30", // Set output framerate to 30 FPS
 		"-c:v", PreferredVideoCodec, // Use the detected preferred codec
-		"-b:v", "0",          // Use CRF for quality
-		"-crf", config.AppConfig.GetCRFValue(),         // Good balance of quality and size
-		"-pix_fmt", "yuv420p",
-		"-color_range", "1", // Explicitly set limited range for output
+		"-b:v", "0", // Use CRF for quality
+		"-crf", config.AppConfig.GetCRFValue(), // Good balance of quality and size
 		"-y", "temp_"+outputFileName,
 	)
 	cmd.Dir = config.AppConfig.DataDir
