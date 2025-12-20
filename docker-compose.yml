@@ -22,5 +22,6 @@ services:
       - GALLERY_DIR=${GALLERY_DIR:-gallery}
       - FFMPEG_LOG_PATH=${FFMPEG_LOG_PATH:-ffmpeg_log.txt}
       - GIN_MODE=${GIN_MODE:-release}
+      - HQSNAP=${HQSNAP:-true}
     volumes:
       - ./data:/app/data

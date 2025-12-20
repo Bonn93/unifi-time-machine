@@ -26,6 +26,7 @@ type Config struct {
 	AppKey               string // Uncommented
 	AdminPassword        string
 	VideoQuality         string
+	HQSnapParams         string
 }
 
 // AppConfig is the global application configuration.
@@ -105,9 +106,11 @@ func LoadConfig() {
 
 		SnapshotsDir:         getEnv("SNAPSHOTS_DIR", "snapshots"),
 
-		GalleryDir:           getEnv("GALLERY_DIR", "gallery"),
+				GalleryDir:           getEnv("GALLERY_DIR", "gallery"),
 
-	}
+				HQSnapParams:         getEnv("HQSNAP", "auto"),
+
+			}
 
 
 

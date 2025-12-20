@@ -47,6 +47,7 @@ func main() {
 	// Start background workers and schedulers
 	cachedstats.Cache.RunUpdater()
 	go worker.Start()
+	snapshot.InitSnapshotSettings()
 	go snapshot.StartSnapshotScheduler()
 	go video.StartVideoGeneratorScheduler()
 	log.Printf("✅ Snapshot Scheduler started with interval: %d seconds", config.AppConfig.SnapshotIntervalSec)
