@@ -29,12 +29,12 @@ func HandleImageStatsData() gin.H {
 	}
 }
 
-func GetTotalImagesCount() int {
+var GetTotalImagesCount = func() int {
 	// This now counts unprocessed images waiting for the next timelapse generation.
 	return len(GetSnapshotFiles())
 }
 
-func GetImagesDiskUsage() string {
+var GetImagesDiskUsage = func() string {
 	var totalSize int64
 	err := filepath.Walk(config.AppConfig.DataDir, func(_ string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -69,7 +69,7 @@ func GetImagesDiskUsage() string {
 	}
 }
 
-func GetLastImageTime() string {
+var GetLastImageTime = func() string {
 	// This now reflects the most recent snapshot taken for the timelapse.
 	files := GetSnapshotFiles()
 	if len(files) == 0 {
@@ -87,7 +87,7 @@ func GetLastImageTime() string {
 	return t.Format("2006-01-02 15:04:05")
 }
 
-func GetLastProcessedImageName() string {
+var GetLastProcessedImageName = func() string {
 	models.VideoStatusData.RLock()
 	lastRun := models.VideoStatusData.LastRun
 	models.VideoStatusData.RUnlock()
@@ -98,7 +98,7 @@ func GetLastProcessedImageName() string {
 	return lastRun.Format("2006-01-02-15-04-05") + ".jpg"
 }
 
-func GetSystemInfo() gin.H {
+var GetSystemInfo = func() gin.H {
 	return gin.H{
 		"os_type":      "Linux",        // Placeholder
 		"cpu_usage":    "0.2%",         // Placeholder
@@ -108,7 +108,7 @@ func GetSystemInfo() gin.H {
 }
 
 // GetAvailableImageDates now scans the flat gallery directory.
-func GetAvailableImageDates() []string {
+var GetAvailableImageDates = func() []string {
 	files, err := os.ReadDir(config.AppConfig.GalleryDir)
 	if err != nil {
 		log.Printf("Error reading gallery directory: %v", err)
@@ -137,7 +137,7 @@ func GetAvailableImageDates() []string {
 }
 
 // GetDailyGallery now uses the dedicated, retained gallery images.
-func GetDailyGallery(dateStr string) []map[string]string {
+var GetDailyGallery = func(dateStr string) []map[string]string {
 	gallery := make([]map[string]string, 24)
 
 	for i := 0; i < 24; i++ {

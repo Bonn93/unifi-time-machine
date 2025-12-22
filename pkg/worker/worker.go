@@ -7,8 +7,57 @@ import (
 	"time"
 
 	"time-machine/pkg/jobs"
+	"time-machine/pkg/models"
 	"time-machine/pkg/services/video"
 )
+
+func processJob(job *models.Job) {
+	log.Printf("Processing job %d: %s", job.ID, job.JobType)
+	err := jobs.UpdateJobStatus(job.ID, "running", nil)
+	if err != nil {
+		log.Printf("Error updating job status to running: %v", err)
+		return
+	}
+
+	var jobErr error
+	switch job.JobType {
+	case "generate_timelapse":
+		var payload struct {
+			TimelapseName string `json:"timelapse_name"`
+		}
+		if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
+			jobErr = err
+		} else {
+			jobErr = video.GenerateSingleTimelapse(payload.TimelapseName)
+		}
+	case "cleanup_snapshots":
+		video.CleanupSnapshots()
+	case "cleanup_videos":
+		video.CleanOldVideos()
+	case "cleanup_logs":
+		video.CleanupLogFiles()
+	default:
+		jobErr = fmt.Errorf("unknown job type: %s", job.JobType)
+		log.Println(jobErr)
+	}
+
+	if jobErr != nil {
+		log.Printf("Error processing job %d: %v", job.ID, jobErr)
+		err = jobs.UpdateJobStatus(job.ID, "failed", jobErr)
+	} else {
+		log.Printf("Job %d completed successfully", job.ID)
+		err = jobs.UpdateJobStatus(job.ID, "completed", nil)
+	}
+
+	if err != nil {
+		log.Printf("Error updating job status after completion/failure: %v", err)
+	}
+
+	err = jobs.DeleteJob(job.ID)
+	if err != nil {
+		log.Printf("Error deleting job %d: %v", job.ID, err)
+	}
+}
 
 func Start() {
 	log.Println("Starting job worker...")
@@ -29,52 +78,6 @@ func Start() {
 			continue
 		}
 
-		log.Printf("Processing job %d: %s", job.ID, job.JobType)
-		err = jobs.UpdateJobStatus(job.ID, "running", nil)
-		if err != nil {
-			log.Printf("Error updating job status to running: %v", err)
-			continue
-		}
-
-		var jobErr error
-		switch job.JobType {
-		case "generate_timelapse":
-			var payload struct {
-				TimelapseName string `json:"timelapse_name"`
-			}
-			if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
-				jobErr = err
-			} else {
-				jobErr = video.GenerateSingleTimelapse(payload.TimelapseName)
-			}
-		case "cleanup_snapshots":
-			video.CleanupSnapshots()
-		case "cleanup_videos":
-			video.CleanOldVideos()
-		case "cleanup_logs":
-			video.CleanupLogFiles()
-		default:
-			jobErr = fmt.Errorf("unknown job type: %s", job.JobType)
-			log.Println(jobErr)
-		}
-
-		if jobErr != nil {
-			log.Printf("Error processing job %d: %v", job.ID, jobErr)
-			err = jobs.UpdateJobStatus(job.ID, "failed", jobErr)
-		} else {
-			log.Printf("Job %d completed successfully", job.ID)
-			err = jobs.UpdateJobStatus(job.ID, "completed", nil)
-		}
-
-		if err != nil {
-			log.Printf("Error updating job status after completion/failure: %v", err)
-		}
-
-		// Clean up the job from the database
-		// I think this will have weird issues
-		err = jobs.DeleteJob(job.ID)
-		if err != nil {
-			log.Printf("Error deleting job %d: %v", job.ID, err)
-		}
+		processJob(job)
 	}
 }

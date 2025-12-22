@@ -242,7 +242,7 @@ func EnqueueTimelapseJobs() {
 }
 
 
-func GenerateSingleTimelapse(timelapseName string) error {
+var GenerateSingleTimelapse = func(timelapseName string) error {
 	log.Printf("--- Processing timelapse: %s ---", timelapseName)
 	detectFFmpegCapabilities()
 
@@ -266,7 +266,7 @@ func GenerateSingleTimelapse(timelapseName string) error {
 	outputFileName := fmt.Sprintf("timelapse_%s.webm", cfg.Name)
 	finalVideoPath := filepath.Join(config.AppConfig.DataDir, outputFileName)
 
-	snapshotsForTimelapse := filterSnapshots(allSnapshots, cfg)
+	snapshotsForTimelapse := filterSnapshots(allSnapshots, cfg, time.Now())
 
 	if len(snapshotsForTimelapse) == 0 {
 		log.Printf("No snapshots available for %s timelapse, skipping.", cfg.Name)
@@ -339,9 +339,8 @@ func GenerateSingleTimelapse(timelapseName string) error {
 }
 
 // filterSnapshots selects files based on the timelapse configuration
-func filterSnapshots(allFiles []string, config models.TimelapseConfig) []string {
+func filterSnapshots(allFiles []string, config models.TimelapseConfig, now time.Time) []string {
 	var filtered []string
-	now := time.Now()
 	cutoff := now.Add(-config.Duration)
 
 	// Pre-filter files that are within the duration
@@ -357,7 +356,7 @@ func filterSnapshots(allFiles []string, config models.TimelapseConfig) []string 
 			continue
 		}
 
-		if fileTime.After(cutoff) {
+		if !fileTime.Before(cutoff) {
 			recentFiles = append(recentFiles, file)
 		}
 	}
@@ -477,7 +476,7 @@ func regenerateFullTimelapse(snapshotFiles []string, outputFileName string) erro
 	return nil
 }
 
-func CleanupSnapshots() {
+var CleanupSnapshots = func() {
 	log.Println("Starting snapshot cleanup...")
 	allSnapshots := util.GetSnapshotFiles()
 
@@ -525,7 +524,7 @@ func CleanupSnapshots() {
 }
 
 // This function is now called from GenerateSingleTimelapse
-func CleanOldVideos() {
+var CleanOldVideos = func() {
 	log.Printf("Starting video archive cleanup (retaining up to %d of each type)...", config.AppConfig.VideoArchivesToKeep)
 
 	for _, cfg := range models.TimelapseConfigsData {
@@ -565,7 +564,7 @@ func CleanOldVideos() {
 			}
 		}
 		
-		func CleanupLogFiles() {
+		var CleanupLogFiles = func() {
 			log.Println("Starting log file cleanup...")
 			files, err := filepath.Glob(filepath.Join(config.AppConfig.DataDir, "ffmpeg_log_*.txt"))
 			if err != nil {

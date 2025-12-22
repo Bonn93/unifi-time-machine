@@ -134,7 +134,11 @@ func HandleForceGenerate(c *gin.Context) {
 
 	if !isRunning {
 		// Execute in a goroutine so the HTTP request completes immediately
-		go video.EnqueueTimelapseJobs()
+		if gin.Mode() == gin.TestMode {
+			video.EnqueueTimelapseJobs()
+		} else {
+			go video.EnqueueTimelapseJobs()
+		}
 	}
 
 	c.Redirect(http.StatusFound, "/")
