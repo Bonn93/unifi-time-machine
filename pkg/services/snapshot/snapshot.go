@@ -194,7 +194,7 @@ func GetCameraStatus() map[string]interface{} {
 	return result
 }
 
-func GetFormattedCameraStatus() map[string]string {
+var GetFormattedCameraStatus = func() map[string]string {
 	rawStatus := GetCameraStatus()
 
 	if rawStatus == nil {

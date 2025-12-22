@@ -1,20 +1,25 @@
-# --- Stage 1: Builder (Using a Debian-based Go image) ---
+# --- Stage 1: Test Runner ---
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS tester
+
+WORKDIR /app
+
+# Copy all source code for testing
+COPY . .
+
+# Run tests
+RUN go test -v ./...
+
+# --- Stage 2: Builder (Using a Debian-based Go image) ---
 # golang:1.22-bullseye is a good choice for a stable build environment
 FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS builder
+
+# Copy source from the tester stage
+COPY --from=tester /app /app
+WORKDIR /app
 
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 RUN echo "I am running on $BUILDPLATFORM, building for $TARGETPLATFORM"
-
-WORKDIR /app
-
-# Copy dependency files and download modules
-COPY go.mod .
-COPY go.sum .
-COPY cmd cmd
-COPY pkg pkg
-RUN go mod tidy
-RUN go mod download
 
 # Build the final application binary
 # Static linking is recommended for smaller, self-contained binaries on Linux
@@ -23,7 +28,7 @@ ARG GOARCH
 RUN CGO_ENABLED=1 GOOS=$GOOS GOARCH=$GOARCH go build -ldflags '-s -w -extldflags "-static"' -tags osusergo,netgo -o /unifi-time-machine ./cmd/server
 
 
-# --- Stage 2: Final Runtime Image ---
+# --- Stage 3: Final Runtime Image ---
 # Use a lightweight Debian image that still supports necessary libraries
 FROM debian:bookworm-slim
 
