@@ -1,7 +1,7 @@
 package config
 
 import (
-	"encoding/base64" // Uncommented
+	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
@@ -23,10 +23,12 @@ type Config struct {
 	VideoCronIntervalSec int
 	VideoArchivesToKeep  int
 	FFmpegLogPath        string
-	AppKey               string // Uncommented
+	AppKey               string
 	AdminPassword        string
 	VideoQuality         string
 	HQSnapParams         string
+	DaysOf24HourSnapshots int
+	SnapshotRetentionDays int
 }
 
 // AppConfig is the global application configuration.
@@ -109,6 +111,10 @@ func LoadConfig() {
 				GalleryDir:           getEnv("GALLERY_DIR", "gallery"),
 
 				HQSnapParams:         getEnv("HQSNAP", "auto"),
+				
+				DaysOf24HourSnapshots: getEnvAsInt("DAYS_OF_24_HOUR_SNAPSHOTS", 30),
+
+				SnapshotRetentionDays: getEnvAsInt("SNAPSHOT_RETENTION_DAYS", 30),
 
 			}
 

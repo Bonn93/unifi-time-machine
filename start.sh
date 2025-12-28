@@ -9,7 +9,7 @@
 LOCAL_DATA_DIR="$PWD/data"
 
 # --- Docker Container Settings ---
-TAG="latest"
+TAG="dev"
 DOCKER_IMAGE="mbern/unifi-time-machine:$TAG"
 CONTAINER_NAME="unifi-time-machine"
 HTTP_PORT="8000" # The external port to access the web UI.
@@ -61,12 +61,14 @@ HQSNAP="auto"
 # --- Data Retention and Cleanup Settings ---
 # The number of old archived timelapse videos to keep.
 VIDEO_ARCHIVES_TO_KEEP="3"
+# The number of days of 24-hour daily timelapses to generate and keep.
+DAYS_OF_24_HOUR_SNAPSHOTS="30"
+# The number of days to retain individual snapshots and gallery images.
+SNAPSHOT_RETENTION_DAYS="30"
 # The directory inside the container for storing snapshots.
 SNAPSHOTS_DIR="snapshots"
 # The directory inside the container for storing gallery images.
 GALLERY_DIR="gallery"
-# The path to the ffmpeg log file.
-FFMPEG_LOG_PATH="ffmpeg_log.txt"
 
 # (Optional) The directory inside the container for storing data.
 # This is set to match the Docker volume target path.
@@ -109,10 +111,11 @@ docker run -d --name "$CONTAINER_NAME" \
   -e TIMELAPSE_INTERVAL="$TIMELAPSE_INTERVAL" \
   -e VIDEO_CRON_INTERVAL="$VIDEO_CRON_INTERVAL" \
   -e VIDEO_ARCHIVES_TO_KEEP="$VIDEO_ARCHIVES_TO_KEEP" \
+  -e DAYS_OF_24_HOUR_SNAPSHOTS="$DAYS_OF_24_HOUR_SNAPSHOTS" \
+  -e SNAPSHOT_RETENTION_DAYS="$SNAPSHOT_RETENTION_DAYS" \
   -e VIDEO_QUALITY="$VIDEO_QUALITY" \
   -e SNAPSHOTS_DIR="$SNAPSHOTS_DIR" \
   -e GALLERY_DIR="$GALLERY_DIR" \
-  -e FFMPEG_LOG_PATH="$FFMPEG_LOG_PATH" \
   -e GIN_MODE="$GIN_MODE" \
   -e HQSNAP="$HQSNAP" \
   -v "$LOCAL_DATA_DIR":/app/data \

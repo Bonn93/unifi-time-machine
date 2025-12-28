@@ -51,7 +51,6 @@ var VideoStatusData = &VideoStatus{
 // might change this to "year to date" rather than a full year for performance as its more clear
 
 var TimelapseConfigsData = []TimelapseConfig{
-	{Name: "24_hour", Duration: 24 * time.Hour, FramePattern: "all"},
 	{Name: "1_week", Duration: 7 * 24 * time.Hour, FramePattern: "hourly"},
 	{Name: "1_month", Duration: 30 * 24 * time.Hour, FramePattern: "daily"},
 	{Name: "1_year", Duration: 365 * 24 * time.Hour, FramePattern: "daily"}, // Using daily for year as well for simplicity

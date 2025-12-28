@@ -1,27 +1,14 @@
 package handlers
 
 import (
-
 	"fmt"
-
 	"net/http"
-
 	"os"
-
 	"path/filepath"
-
 	"sort"
-
 	"strings"
-
 	"time"
-
-
-
 	"github.com/gin-gonic/gin"
-
-
-
 	"time-machine/pkg/cachedstats"
 	"time-machine/pkg/config"
 	"time-machine/pkg/database"
@@ -30,6 +17,12 @@ import (
 	"time-machine/pkg/stats"
 	"time-machine/pkg/util"
 )
+
+// HandleForceGenerate enqueues all timelapse jobs to be processed by the worker.
+func HandleForceGenerate(c *gin.Context) {
+	go video.EnqueueTimelapseJobs() // Run in a goroutine to not block the UI
+	c.Redirect(http.StatusFound, "/")
+}
 
 // --- HANDLERS ---
 
@@ -67,32 +60,103 @@ func HandleLoginPost(c *gin.Context) {
 }
 
 func HandleDashboard(c *gin.Context) {
-	// --- New Timelapse Info ---
-	var availableTimelapses []gin.H
-	var firstAvailableVideo string
-	videoExists := false
 	models.VideoStatusData.RLock()
-	for _, cfg := range models.TimelapseConfigsData {
-		fileName := fmt.Sprintf("timelapse_%s.webm", cfg.Name)
-		filePath := filepath.Join(config.AppConfig.DataDir, fileName)
-		isGenerating := models.VideoStatusData.IsRunning && models.VideoStatusData.CurrentlyGenerating == cfg.Name
+	defer models.VideoStatusData.RUnlock()
 
-		// A video is "available" if it exists OR is currently being generated
-		if util.FileExists(filePath) || isGenerating {
-			if !videoExists {
-				firstAvailableVideo = "/data/" + fileName
-				videoExists = true
-			}
-			availableTimelapses = append(availableTimelapses, gin.H{
-				"Name":         strings.ReplaceAll(cfg.Name, "_", " "),
-				"FileName":     fileName,
-				"Path":         "/data/" + fileName,
-				"IsGenerating": isGenerating,
+	// --- New Timelapse Data Structure ---
+	// map[TIMELAPSE_TYPE] -> list of videos
+	availableTimelapses := make(map[string][]gin.H)
+
+	// --- Daily 24-Hour Timelapses ---
+	var dailyVideos []gin.H
+	for i := 0; i < config.AppConfig.DaysOf24HourSnapshots; i++ {
+		targetDate := time.Now().AddDate(0, 0, -i)
+		dateStr := targetDate.Format("2006-01-02")
+		fileName := fmt.Sprintf("timelapse_24_hour_%s.webm", dateStr)
+		filePath := filepath.Join(config.AppConfig.DataDir, fileName)
+
+		if util.FileExists(filePath) {
+			dailyVideos = append(dailyVideos, gin.H{
+				"Date": dateStr,
+				"Path": "/data/" + fileName,
 			})
 		}
 	}
+	if len(dailyVideos) > 0 {
+		sort.Slice(dailyVideos, func(i, j int) bool {
+			return dailyVideos[i]["Date"].(string) > dailyVideos[j]["Date"].(string)
+		})
+		availableTimelapses["Daily"] = dailyVideos
+	}
 
-	// Gather all data points
+	// --- Other Timelapse Info (Weekly, Monthly, Yearly) ---
+	allVideoFiles, err := filepath.Glob(filepath.Join(config.AppConfig.DataDir, "timelapse_*.webm"))
+	if err != nil {
+		// Log the error but don't crash the page
+		fmt.Printf("Error globbing video files: %v\n", err)
+	}
+
+	for _, cfg := range models.TimelapseConfigsData {
+		var otherVideos []gin.H
+		baseName := fmt.Sprintf("timelapse_%s.webm", cfg.Name)
+		archivePrefix := fmt.Sprintf("timelapse_%s_", cfg.Name)
+
+		// Check for the main file
+		if util.FileExists(filepath.Join(config.AppConfig.DataDir, baseName)) {
+			otherVideos = append(otherVideos, gin.H{
+				"Date": "Latest",
+				"Path": "/data/" + baseName,
+			})
+		}
+
+		// Find archives
+		for _, file := range allVideoFiles {
+			fileName := filepath.Base(file)
+			if strings.HasPrefix(fileName, archivePrefix) && strings.HasSuffix(fileName, ".webm") {
+				// Extract date from "timelapse_1_week_20231027_150405.webm"
+				datePart := strings.TrimSuffix(strings.TrimPrefix(fileName, archivePrefix), ".webm")
+				parsedTime, err := time.Parse("20060102_150405", datePart)
+				var displayDate string
+				if err != nil {
+					displayDate = datePart // Fallback to raw string
+				} else {
+					displayDate = parsedTime.Format("2006-01-02 15:04:05")
+				}
+				otherVideos = append(otherVideos, gin.H{
+					"Date": displayDate,
+					"Path": "/data/" + fileName,
+				})
+			}
+		}
+
+		if len(otherVideos) > 0 {
+			sort.Slice(otherVideos, func(i, j int) bool {
+				// Simple sort: "Latest" always comes first, then by date string descending
+				if otherVideos[i]["Date"] == "Latest" {
+					return true
+				}
+				if otherVideos[j]["Date"] == "Latest" {
+					return false
+				}
+				return otherVideos[i]["Date"].(string) > otherVideos[j]["Date"].(string)
+			})
+			var typeName string
+			switch cfg.Name {
+			case "1_week":
+				typeName = "Weekly"
+			case "1_month":
+				typeName = "Monthly"
+			case "1_year":
+				typeName = "Yearly"
+			default:
+				typeName = strings.Title(strings.ReplaceAll(cfg.Name, "_", " "))
+			}
+			availableTimelapses[typeName] = otherVideos
+		}
+	}
+
+	videoExists := len(availableTimelapses) > 0
+
 	currentVideoStatus := gin.H{
 		"IsRunning":           models.VideoStatusData.IsRunning,
 		"LastRun":             "N/A",
@@ -103,17 +167,16 @@ func HandleDashboard(c *gin.Context) {
 	if models.VideoStatusData.LastRun != nil {
 		currentVideoStatus["LastRun"] = models.VideoStatusData.LastRun.Format("2006-01-02 15:04:05")
 	}
-	models.VideoStatusData.RUnlock()
 
 	user, _ := c.Get("user")
 	cachedData := cachedstats.Cache.GetData()
+	timelapseOrder := []string{"Daily", "Weekly", "Monthly", "Yearly"}
 
-	// Consolidate data into a single map for the template
 	data := gin.H{
 		"Now":                  time.Now().Format("2006-01-02 15:04:05"),
-		"VideoExists":          videoExists, // True if any video exists
-		"FirstAvailableVideo":  firstAvailableVideo,
+		"VideoExists":          videoExists,
 		"AvailableTimelapses":  availableTimelapses,
+		"TimelapseOrder":       timelapseOrder,
 		"VideoStatus":          currentVideoStatus,
 		"ImageStats":           cachedData,
 		"SystemInfo":           cachedData["system_info"],
@@ -125,23 +188,6 @@ func HandleDashboard(c *gin.Context) {
 	}
 
 	c.HTML(http.StatusOK, "index.html", data)
-}
-
-func HandleForceGenerate(c *gin.Context) {
-	models.VideoStatusData.RLock()
-	isRunning := models.VideoStatusData.IsRunning
-	models.VideoStatusData.RUnlock()
-
-	if !isRunning {
-		// Execute in a goroutine so the HTTP request completes immediately
-		if gin.Mode() == gin.TestMode {
-			video.EnqueueTimelapseJobs()
-		} else {
-			go video.EnqueueTimelapseJobs()
-		}
-	}
-
-	c.Redirect(http.StatusFound, "/")
 }
 
 func HandleLog(c *gin.Context) {
@@ -217,6 +263,7 @@ func HandleDailyGallery(c *gin.Context) {
 
 	// For simplicity, we'll just refetch if a different date is requested.
 	// Caching daily galleries for all possible dates is more complex.
+	// cache needs work...
 	if dateStr == time.Now().Format("2006-01-02") {
 		c.JSON(http.StatusOK, gin.H{
 			"date":   dateStr,
