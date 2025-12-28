@@ -644,7 +644,7 @@ var CleanupGallery = func() {
 		return
 	}
 
-	retentionCutoff := time.Now().Add(-time.Duration(config.AppConfig.SnapshotRetentionDays) * 24 * time.Hour)
+	retentionCutoff := time.Now().Add(-time.Duration(config.AppConfig.GalleryRetentionDays) * 24 * time.Hour)
 	filesToDelete := 0
 
 	for _, file := range files {

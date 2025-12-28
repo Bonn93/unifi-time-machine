@@ -63,8 +63,10 @@ HQSNAP="auto"
 VIDEO_ARCHIVES_TO_KEEP="3"
 # The number of days of 24-hour daily timelapses to generate and keep.
 DAYS_OF_24_HOUR_SNAPSHOTS="30"
-# The number of days to retain individual snapshots and gallery images.
+# The number of days to retain individual snapshots.
 SNAPSHOT_RETENTION_DAYS="30"
+# The number of days to retain gallery images.
+GALLERY_RETENTION_DAYS="365"
 # The directory inside the container for storing snapshots.
 SNAPSHOTS_DIR="snapshots"
 # The directory inside the container for storing gallery images.
@@ -113,6 +115,7 @@ docker run -d --name "$CONTAINER_NAME" \
   -e VIDEO_ARCHIVES_TO_KEEP="$VIDEO_ARCHIVES_TO_KEEP" \
   -e DAYS_OF_24_HOUR_SNAPSHOTS="$DAYS_OF_24_HOUR_SNAPSHOTS" \
   -e SNAPSHOT_RETENTION_DAYS="$SNAPSHOT_RETENTION_DAYS" \
+  -e GALLERY_RETENTION_DAYS="$GALLERY_RETENTION_DAYS" \
   -e VIDEO_QUALITY="$VIDEO_QUALITY" \
   -e SNAPSHOTS_DIR="$SNAPSHOTS_DIR" \
   -e GALLERY_DIR="$GALLERY_DIR" \

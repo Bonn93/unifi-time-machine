@@ -266,9 +266,9 @@ func TestCleanupGallery(t *testing.T) {
 	defer func() { config.AppConfig.GalleryDir = originalGalleryDir }()
 
 	// Set a specific retention period for this test
-	originalRetentionDays := config.AppConfig.SnapshotRetentionDays
-	config.AppConfig.SnapshotRetentionDays = 1
-	defer func() { config.AppConfig.SnapshotRetentionDays = originalRetentionDays }()
+	originalRetentionDays := config.AppConfig.GalleryRetentionDays
+	config.AppConfig.GalleryRetentionDays = 1
+	defer func() { config.AppConfig.GalleryRetentionDays = originalRetentionDays }()
 
 	// Create an old file that should be deleted
 	oldTime := time.Now().Add(-2 * 24 * time.Hour)
