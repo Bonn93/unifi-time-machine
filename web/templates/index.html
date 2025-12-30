@@ -7,129 +7,9 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
     
-    <style>
-        :root {
-            --bs-blue: #0d6efd;
-            --bs-green: #198754;
-            --bs-red: #dc3545;
-            --bs-yellow: #ffc107;
-            --dark-bg: #121212;
-            --card-bg: #1e1e1e;
-            --border-color: #333;
-            --text-primary: #e0e0e0;
-            --text-secondary: #a0a0a0;
-        }
-
-        body {
-            background-color: var(--dark-bg);
-            color: var(--text-primary);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        }
-
-        .container-fluid {
-            max-width: 1800px;
-        }
-
-        h1, .h1 {
-            color: #fff;
-            font-weight: 300;
-            letter-spacing: -0.5px;
-        }
-        
-        hr {
-            border-color: var(--border-color);
-        }
-
-        .card {
-            background-color: var(--card-bg);
-            border: 1px solid var(--border-color);
-            transition: all 0.3s ease-in-out;
-            border-radius: 0.5rem;
-            color: #fff;
-        }
-        
-        .card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
-            border-color: var(--bs-blue);
-        }
-
-        .card-header {
-            background-color: transparent;
-            color: #fff;
-            font-weight: 500;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 0.75rem;
-        }
-
-        .status-badge-ok, .status-connected { 
-            background-color: var(--bs-green) !important; 
-            color: white; 
-        }
-        .status-error, .status-disconnected { 
-            background-color: var(--bs-red) !important; 
-            color: white; 
-        }
-        .status-running { 
-            background-color: var(--bs-yellow) !important;
-            color: black; 
-        }
-
-        .form-select, .form-control {
-            background-color: #2a2a2a;
-            color: var(--text-primary);
-            border-color: var(--border-color);
-        }
-        .form-select:focus, .form-control:focus {
-            background-color: #2a2a2a;
-            color: var(--text-primary);
-            border-color: var(--bs-blue);
-            box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
-        }
-
-        .btn-primary {
-            background-color: var(--bs-blue);
-            border-color: var(--bs-blue);
-            transition: all 0.2s ease;
-        }
-        .btn-primary:hover {
-            opacity: 0.9;
-        }
-
-        .text-secondary {
-            color: var(--text-secondary) !important;
-        }
-
-        .gallery-image-container {
-            position: relative;
-            overflow: hidden;
-            border-radius: 0.375rem;
-            height: 100px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background-color: #2c3034;
-            border: 1px solid var(--border-color);
-        }
-        .gallery-image {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transition: transform 0.3s ease;
-        }
-        .gallery-image:hover {
-            transform: scale(1.1);
-        }
-        .no-capture {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-        }
-
-        video {
-            border: 1px solid var(--border-color);
-            background-color: #000;
-        }
-    </style>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="container-fluid py-4">
@@ -157,11 +37,13 @@
                 <div class="card h-100">
                     <div class="card-header"><i class="fas fa-video me-2"></i>Video Status & Control</div>
                     <div class="card-body">
+						{{if .User.IsAdmin}}
 						<form method="POST" action="/force-generate">
                             <button type="submit" class="btn btn-primary btn-sm w-100 mb-2">
                                 <i class="fas fa-play me-1"></i> Force Generate All
                             </button>
                         </form>
+						{{end}}
                         <a href="/log" class="btn btn-info btn-sm w-100 mb-2" target="_blank">View FFmpeg Log</a>
                     </div>
                 </div>
@@ -181,8 +63,8 @@
                     <div class="card-header"><i class="fas fa-cogs me-2"></i>System Info</div>
                     <div class="card-body">
                         <p><strong>OS Type:</strong> {{.SystemInfo.os_type}}</p>
-                        <p><strong>CPU Usage:</strong> {{.SystemInfo.cpu_usage}}</p>
-                        <p><strong>Memory Usage:</strong> {{.SystemInfo.memory_usage}}</p>
+                        <p><strong>CPU Usage:</strong> <span id="cpu-usage">{{.SystemInfo.cpu_usage}}</span></p>
+                        <p><strong>Memory Usage:</strong> <span id="memory-usage">{{.SystemInfo.memory_usage}}</span></p>
                     </div>
                 </div>
             </div>
@@ -257,104 +139,12 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-
     <script>
         // Go variables passed to JS
         const availableDates = JSON.parse('{{js .AvailableDates}}');
         const defaultDate = "{{.DefaultGalleryDate}}";
         const initialGalleryData = JSON.parse('{{js .DefaultGalleryImages}}');
-
-        document.addEventListener('DOMContentLoaded', () => {
-            
-            // --- New Timelapse Card Logic ---
-            const allTimelapseSelects = document.querySelectorAll('.timelapse-select');
-            allTimelapseSelects.forEach(select => {
-                select.addEventListener('change', (event) => {
-                    const newSource = event.target.value;
-                    const videoPlayerId = event.target.dataset.videoTarget;
-                    const downloadButtonId = event.target.dataset.downloadTarget;
-
-                    const videoPlayer = document.getElementById(videoPlayerId);
-                    const downloadButton = document.getElementById(downloadButtonId);
-
-                    if (videoPlayer) {
-                        videoPlayer.src = newSource;
-                        videoPlayer.load();
-                    }
-                    if (downloadButton) {
-                        downloadButton.href = newSource;
-                    }
-                });
-            });
-
-            // --- Gallery Logic (Unchanged) ---
-            const dateSelect = document.getElementById('date-select');
-            if (dateSelect) {
-                availableDates.forEach(date => {
-                    const option = document.createElement('option');
-                    option.value = date;
-                    option.textContent = date;
-                    if (date === defaultDate) {
-                        option.selected = true;
-                    }
-                    dateSelect.appendChild(option);
-                });
-
-                renderGallery(initialGalleryData, defaultDate);
-
-                dateSelect.addEventListener('change', (event) => {
-                    fetchGallery(event.target.value);
-                });
-            }
-        });
-
-        // Helper function to render the gallery grid
-        function renderGallery(galleryData, date) {
-            const galleryGrid = document.getElementById('gallery-grid');
-            galleryGrid.innerHTML = '';
-            document.getElementById('current-gallery-date').textContent = date;
-            
-            galleryData.forEach(item => {
-                const col = document.createElement('div');
-                col.className = 'col text-center';
-
-                let content = '';
-                if (item.available === "true") {
-                    content = `
-                        <div class="gallery-image-container">
-                            <a href="${item.url}" target="_blank">
-                                <img src="${item.url}" class="gallery-image" alt="Snapshot at ${item.time}">
-                            </a>
-                        </div>
-                    `;
-                } else {
-                    content = `
-                        <div class="gallery-image-container d-flex align-items-center justify-content-center">
-                            <i class="fas fa-camera-slash me-1 text-muted"></i>
-                            <span class="no-capture">No Snap</span>
-                        </div>
-                    `;
-                }
-
-                col.innerHTML = `<small class="text-secondary">${item.time}</small>${content}`;
-                galleryGrid.appendChild(col);
-            });
-        }
-
-        // Function to fetch new gallery data
-        async function fetchGallery(date) {
-            document.getElementById('gallery-grid').innerHTML = '<div class="text-center text-primary-highlight py-4"><i class="fas fa-sync fa-spin me-2"></i> Loading Gallery...</div>';
-            try {
-                const response = await fetch(`/api/gallery?date=${date}`);
-                const data = await response.json();
-                
-                document.getElementById('gallery-info').innerHTML = `Displaying hourly snapshots for <span class="text-primary-highlight" id="current-gallery-date">${data.date}</span>.`;
-                renderGallery(data.images, data.date);
-            } catch (error) {
-                console.error('Error fetching gallery data:', error);
-                document.getElementById('gallery-grid').innerHTML = '<div class="alert alert-danger">Failed to load gallery for this date.</div>';
-            }
-        }
     </script>
+    <script src="/static/js/main.js"></script>
 </body>
 </html>

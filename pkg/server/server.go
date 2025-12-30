@@ -22,13 +22,16 @@ func SetupRouter() *gin.Engine {
 			return template.JS(j), err
 		},
 	})
-	r.LoadHTMLFiles("index.html", "admin.html", "login.html", "error.html", "log.html")
+	r.LoadHTMLGlob("web/templates/*")
 
 	// Login page route (GET) - serves the login HTML
 	r.GET("/login", handlers.HandleLoginGet)
 	// Login API endpoint (POST) - handles login logic and JWT issuance
 	r.POST("/api/login", auth.LoginHandler)
 	r.GET("/unauthorized", handlers.HandleUnauthorized)
+
+	// Static files for CSS and JS
+	r.Static("/static", "./web/static")
 
 	// --- Authenticated Route Group ---
 	authorized := r.Group("/")
@@ -43,8 +46,7 @@ func SetupRouter() *gin.Engine {
 		// Actions
 		authorized.GET("/log", handlers.HandleLog)
 
-		// API Endpoints
-		authorized.GET("/api/status", handlers.HandleSystemStats)
+		authorized.GET("/api/system-stats", handlers.HandleSystemStatsJSON)
 		authorized.GET("/api/images", handlers.HandleImageStats)
 		authorized.GET("/api/gallery", handlers.HandleDailyGallery)
 
@@ -52,7 +54,7 @@ func SetupRouter() *gin.Engine {
 		adminRoutes := authorized.Group("/")
 		adminRoutes.Use(auth.AdminOnlyMiddleware())
 		{
-			adminRoutes.POST("/generate", handlers.HandleForceGenerate)
+			adminRoutes.POST("/force-generate", handlers.HandleForceGenerate)
 			adminRoutes.GET("/admin", handlers.HandleAdminPage) // Note: removed trailing slash for consistency
 			adminRoutes.POST("/admin/users", handlers.HandleCreateUser)
 		}

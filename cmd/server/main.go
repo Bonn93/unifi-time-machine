@@ -4,14 +4,15 @@ import (
 	"log"
 	"os"
 
+	"time-machine/pkg/cachedstats"
 	"time-machine/pkg/config"
 	"time-machine/pkg/database"
 	"time-machine/pkg/jobs"
 	"time-machine/pkg/server"
 	"time-machine/pkg/services/snapshot"
 	"time-machine/pkg/services/video"
+	"time-machine/pkg/stats"
 	"time-machine/pkg/worker"
-	"time-machine/pkg/cachedstats"
 )
 
 func main() {
@@ -30,7 +31,7 @@ func main() {
 	jobs.InitJobs(database.GetDB())
 
 	// Create initial admin user if it doesn't exist
-	// Can probably make a nicer GUI and set this up and remove a cleartext password in env var 
+	// Can probably make a nicer GUI and set this up and remove a cleartext password in env var
 	adminUserExists, err := database.UserExists("admin")
 	if err != nil {
 		log.Fatalf("Failed to check if admin user exists: %v", err)
@@ -46,6 +47,7 @@ func main() {
 
 	// Start background workers and schedulers
 	cachedstats.Cache.RunUpdater()
+	stats.StartStatsCollector()
 	go worker.Start()
 	snapshot.InitSnapshotSettings()
 	go snapshot.StartSnapshotScheduler()

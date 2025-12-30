@@ -247,8 +247,8 @@ func HandleLog(c *gin.Context) {
 	})
 }
 
-func HandleSystemStats(c *gin.Context) {
-	c.JSON(http.StatusOK, cachedstats.Cache.GetData()["system_info"])
+func HandleSystemStatsJSON(c *gin.Context) {
+	c.JSON(http.StatusOK, stats.GetSystemInfo())
 }
 
 func HandleImageStats(c *gin.Context) {

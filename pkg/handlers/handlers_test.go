@@ -102,9 +102,9 @@ func TestHandleAdminPage(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-func TestHandleSystemStats(t *testing.T) {
+func TestHandleSystemStatsJSON(t *testing.T) {
 	r := setupRouter()
-	r.GET("/stats/system", HandleSystemStats)
+	r.GET("/stats/system", HandleSystemStatsJSON)
 
 	req, _ := http.NewRequest("GET", "/stats/system", nil)
 	w := httptest.NewRecorder()
