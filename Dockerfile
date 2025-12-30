@@ -64,12 +64,7 @@ WORKDIR /app
 COPY --from=builder /unifi-time-machine /usr/local/bin/unifi-time-machine
 
 # --- ASSET COPY ---
-COPY web/templates/index.html .
-COPY web/templates/admin.html .
-COPY web/templates/login.html .
-COPY web/templates/error.html .
-COPY web/templates/log.html .
-
+COPY web ./web
 
 RUN mkdir -p /app/data
 VOLUME /app/data

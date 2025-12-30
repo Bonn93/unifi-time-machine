@@ -37,7 +37,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.PAT_TOKEN }}
-          tag_name: ${{ github.ref }}
+          tag_name: ${{ github.ref_name }}
           generate_release_notes: true  # Auto-generates "What's Changed" list
           body_path: RELEASE_NOTES.txt   # Optional: Reads this file for extra details
           draft: false

@@ -5,17 +5,66 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/mem"
 
 	"time-machine/pkg/config"
 	"time-machine/pkg/models"
 	"time-machine/pkg/services/video" // Import the video package
 	"time-machine/pkg/util"
 )
+
+// SystemStats holds the CPU and memory usage data.
+type SystemStats struct {
+	mu          sync.RWMutex
+	CPUUsage    string `json:"cpu_usage"`
+	MemoryUsage string `json:"memory_usage"`
+	OS          string `json:"os"`
+	IsReady     bool   `json:"is_ready"`
+}
+
+var currentStats = &SystemStats{
+	CPUUsage:    "Loading...",
+	MemoryUsage: "Loading...",
+	OS:          runtime.GOOS,
+	IsReady:     false,
+}
+
+// StartStatsCollector starts a goroutine to periodically fetch system stats.
+func StartStatsCollector() {
+	go func() {
+		for {
+			cpuPercent, err := cpu.Percent(time.Second, false)
+			if err != nil {
+				log.Printf("Error getting CPU usage: %v", err)
+			}
+
+			memInfo, err := mem.VirtualMemory()
+			if err != nil {
+				log.Printf("Error getting memory usage: %v", err)
+			}
+
+			currentStats.mu.Lock()
+			if len(cpuPercent) > 0 {
+				currentStats.CPUUsage = fmt.Sprintf("%.2f%%", cpuPercent[0])
+			}
+			if memInfo != nil {
+				currentStats.MemoryUsage = fmt.Sprintf("%.2f%%", memInfo.UsedPercent)
+			}
+			currentStats.IsReady = true
+			currentStats.mu.Unlock()
+
+			time.Sleep(5 * time.Second) // Update every 5 seconds
+		}
+	}()
+}
 
 // needs good wrapping with go routines and caching later, leverage the dB and make the UI more async for faster loads.
 
@@ -99,10 +148,13 @@ var GetLastProcessedImageName = func() string {
 }
 
 var GetSystemInfo = func() gin.H {
+	currentStats.mu.RLock()
+	defer currentStats.mu.RUnlock()
+
 	return gin.H{
-		"os_type":      "Linux",        // Placeholder
-		"cpu_usage":    "0.2%",         // Placeholder
-		"memory_usage": "10.1%",        // Placeholder
+		"os_type":      currentStats.OS,
+		"cpu_usage":    currentStats.CPUUsage,
+		"memory_usage": currentStats.MemoryUsage,
 		"av1_status":   fmt.Sprintf("Available (%s)", video.PreferredVideoCodec),
 	}
 }
@@ -135,6 +187,7 @@ var GetAvailableImageDates = func() []string {
 	sort.Sort(sort.Reverse(sort.StringSlice(dates)))
 	return dates
 }
+
 
 // GetDailyGallery now uses the dedicated, retained gallery images.
 var GetDailyGallery = func(dateStr string) []map[string]string {

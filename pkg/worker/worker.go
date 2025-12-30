@@ -32,6 +32,8 @@ func processJob(job *models.Job) {
 		}
 	case "cleanup_snapshots":
 		video.CleanupSnapshots()
+	case "cleanup_gallery":
+		video.CleanupGallery()
 	case "cleanup_videos":
 		video.CleanOldVideos()
 	case "cleanup_logs":

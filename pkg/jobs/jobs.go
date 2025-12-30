@@ -14,7 +14,7 @@ func InitJobs(database *sql.DB) {
 }
 
 // CreateJob creates a new job in the database.
-func CreateJob(jobType string, payload interface{}) (int64, error) {
+var CreateJob = func(jobType string, payload interface{}) (int64, error) {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal job payload: %w", err)

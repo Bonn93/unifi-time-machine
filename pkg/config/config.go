@@ -1,7 +1,7 @@
 package config
 
 import (
-	"encoding/base64" // Uncommented
+	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
@@ -23,10 +23,13 @@ type Config struct {
 	VideoCronIntervalSec int
 	VideoArchivesToKeep  int
 	FFmpegLogPath        string
-	AppKey               string // Uncommented
+	AppKey               string
 	AdminPassword        string
 	VideoQuality         string
 	HQSnapParams         string
+	DaysOf24HourSnapshots int
+	SnapshotRetentionDays int
+	GalleryRetentionDays  int
 }
 
 // AppConfig is the global application configuration.
@@ -109,6 +112,11 @@ func LoadConfig() {
 				GalleryDir:           getEnv("GALLERY_DIR", "gallery"),
 
 				HQSnapParams:         getEnv("HQSNAP", "auto"),
+				
+				DaysOf24HourSnapshots: getEnvAsInt("DAYS_OF_24_HOUR_SNAPSHOTS", 30),
+
+				SnapshotRetentionDays: getEnvAsInt("SNAPSHOT_RETENTION_DAYS", 30),
+				GalleryRetentionDays:  getEnvAsInt("GALLERY_RETENTION_DAYS", 365),
 
 			}
 
@@ -152,6 +160,18 @@ func LoadConfig() {
 
 	log.Printf("UFP Host set to: %s", AppConfig.UFPHost)
 
+	log.Println("--- Application Configuration ---")
+	log.Printf("Target Camera ID: %s", AppConfig.TargetCameraID)
+	log.Printf("Data Directory: %s", AppConfig.DataDir)
+	log.Printf("Snapshot Interval: %d seconds", AppConfig.SnapshotIntervalSec)
+	log.Printf("Video Cron Interval: %d seconds", AppConfig.VideoCronIntervalSec)
+	log.Printf("Video Archives to Keep: %d", AppConfig.VideoArchivesToKeep)
+	log.Printf("Video Quality: %s", AppConfig.VideoQuality)
+	log.Printf("High Quality Snapshots: %s", AppConfig.HQSnapParams)
+	log.Printf("Days of 24-Hour Timelapses: %d", AppConfig.DaysOf24HourSnapshots)
+	log.Printf("Snapshot Retention Days: %d", AppConfig.SnapshotRetentionDays)
+	log.Printf("Gallery Retention Days: %d", AppConfig.GalleryRetentionDays)
+	log.Println("---------------------------------")
 }
 
 func getEnv(key, defaultValue string) string {

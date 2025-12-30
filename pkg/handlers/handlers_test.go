@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"encoding/json"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -100,9 +102,9 @@ func TestHandleAdminPage(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-func TestHandleSystemStats(t *testing.T) {
+func TestHandleSystemStatsJSON(t *testing.T) {
 	r := setupRouter()
-	r.GET("/stats/system", HandleSystemStats)
+	r.GET("/stats/system", HandleSystemStatsJSON)
 
 	req, _ := http.NewRequest("GET", "/stats/system", nil)
 	w := httptest.NewRecorder()
@@ -178,9 +180,9 @@ func TestHandleForceGenerate(t *testing.T) {
 	config.AppConfig.DataDir = t.TempDir()
 	database.InitDB()
 	jobs.InitJobs(database.GetDB())
-	r.GET("/force-generate", HandleForceGenerate)
+	r.POST("/force-generate", HandleForceGenerate)
 
-	req, _ := http.NewRequest("GET", "/force-generate", nil)
+	req, _ := http.NewRequest("POST", "/force-generate", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -242,3 +244,130 @@ func TestHandleLoginPost(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
+
+func TestHandleDashboard_VideoGrouping(t *testing.T) {
+
+	// 1. Setup temp data directory
+
+	tempDataDir := t.TempDir()
+
+	originalDataDir := config.AppConfig.DataDir
+
+	config.AppConfig.DataDir = tempDataDir
+
+	defer func() { config.AppConfig.DataDir = originalDataDir }()
+
+
+
+	// 2. Create dummy video files
+
+	today := time.Now()
+
+	yesterday := today.AddDate(0, 0, -1)
+
+	os.WriteFile(filepath.Join(tempDataDir, "timelapse_24_hour_"+today.Format("2006-01-02")+ ".webm"), []byte(""), 0644)
+
+	os.WriteFile(filepath.Join(tempDataDir, "timelapse_24_hour_"+yesterday.Format("2006-01-02")+ ".webm"), []byte(""), 0644)
+
+	os.WriteFile(filepath.Join(tempDataDir, "timelapse_1_week.webm"), []byte(""), 0644)
+
+	os.WriteFile(filepath.Join(tempDataDir, "timelapse_1_week_20251026_120000.webm"), []byte(""), 0644)
+
+	os.WriteFile(filepath.Join(tempDataDir, "timelapse_1_month.webm"), []byte(""), 0644)
+
+
+
+	// 3. Setup router and special template
+
+	r := gin.Default()
+
+	tempTemplateDir := t.TempDir()
+
+	templatePath := filepath.Join(tempTemplateDir, "index.html")
+
+	templateContent := `{"order": {{ .TimelapseOrder | marshal }}, "videos": {{ .AvailableTimelapses | marshal }}}`
+
+
+
+	marshal := func(v interface{}) (template.HTML, error) {
+
+		a, err := json.Marshal(v)
+
+		return template.HTML(a), err
+
+	}
+
+	r.SetFuncMap(template.FuncMap{"marshal": marshal})
+
+	os.WriteFile(templatePath, []byte(templateContent), 0644)
+
+	r.LoadHTMLFiles(templatePath)
+
+
+
+	// 4. Setup handler and execute request
+
+	r.GET("/", func(c *gin.Context) {
+
+		c.Set("user", &models.User{Username: "test"})
+
+		config.AppConfig.DaysOf24HourSnapshots = 2
+
+		HandleDashboard(c)
+
+	})
+
+
+
+	req, _ := http.NewRequest("GET", "/", nil)
+
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+
+
+	// 5. Unmarshal and assert
+
+	var result struct {
+
+		Order  []string
+
+		Videos map[string][]map[string]string
+
+	}
+
+	err := json.Unmarshal(w.Body.Bytes(), &result)
+
+	assert.NoError(t, err)
+
+
+
+	// Assertions for order
+
+	assert.Equal(t, []string{"Daily", "Weekly", "Monthly", "Yearly"}, result.Order)
+
+
+
+	// Assertions for videos
+
+	assert.Len(t, result.Videos["Daily"], 2, "Should be 2 daily videos")
+
+	assert.Len(t, result.Videos["Weekly"], 2, "Should be 2 weekly videos")
+
+	assert.Len(t, result.Videos["Monthly"], 1, "Should be 1 monthly video")
+
+	assert.Nil(t, result.Videos["Yearly"], "Yearly should be nil")
+
+
+
+	assert.Equal(t, "Latest", result.Videos["Weekly"][0]["Date"])
+
+	assert.Equal(t, "2025-10-26 12:00:00", result.Videos["Weekly"][1]["Date"])
+
+}
+

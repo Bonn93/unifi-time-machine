@@ -83,9 +83,17 @@ func TestGetLastProcessedImageName(t *testing.T) {
 }
 
 func TestGetSystemInfo(t *testing.T) {
+	// Start the collector
+	StartStatsCollector()
+
+	// Give it a moment to run
+	time.Sleep(2 * time.Second)
+
 	info := GetSystemInfo()
 	assert.NotNil(t, info)
 	assert.Contains(t, info, "os_type")
+	assert.NotEqual(t, "Loading...", info["cpu_usage"])
+	assert.NotEqual(t, "Loading...", info["memory_usage"])
 }
 
 func TestGetAvailableImageDates(t *testing.T) {

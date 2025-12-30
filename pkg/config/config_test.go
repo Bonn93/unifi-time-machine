@@ -54,6 +54,7 @@ func TestLoadConfig(t *testing.T) {
 	os.Setenv("GALLERY_DIR", "test_gallery")
 	os.Setenv("HQSNAP", "high_quality")
 	os.Setenv("UFP_HOST", "testhost")
+	os.Setenv("DAYS_OF_24_HOUR_SNAPSHOTS", "7")
 
 	LoadConfig()
 
@@ -70,6 +71,7 @@ func TestLoadConfig(t *testing.T) {
 	assert.True(t, strings.HasSuffix(AppConfig.GalleryDir, "test_gallery"))
 	assert.Equal(t, "https://testhost", AppConfig.UFPHost)
 	assert.Equal(t, "high_quality", AppConfig.HQSnapParams)
+	assert.Equal(t, 7, AppConfig.DaysOf24HourSnapshots)
 
 	// Test default values
 	os.Clearenv()
@@ -85,6 +87,8 @@ func TestLoadConfig(t *testing.T) {
 	assert.True(t, strings.HasSuffix(AppConfig.SnapshotsDir, "snapshots"))
 	assert.True(t, strings.HasSuffix(AppConfig.GalleryDir, "gallery"))
 	assert.Equal(t, "auto", AppConfig.HQSnapParams)
+	assert.Equal(t, 30, AppConfig.DaysOf24HourSnapshots)
+	assert.Equal(t, 30, AppConfig.SnapshotRetentionDays)
 }
 
 func TestGetEnvAsInt(t *testing.T) {

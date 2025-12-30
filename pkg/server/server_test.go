@@ -8,6 +8,7 @@ import (
 	"time-machine/pkg/auth"
 	"time-machine/pkg/config"
 	"time-machine/pkg/database"
+	"time-machine/pkg/jobs"
 	"time-machine/pkg/models"
 
 	"github.com/gin-gonic/gin"
@@ -26,24 +27,27 @@ func TestMain(m *testing.M) {
 	defer os.RemoveAll(tempDir)
 	config.AppConfig.DataDir = tempDir
 
-	// Initialise the database
+	// Initialise the database and jobs
 	database.InitDB()
+	jobs.InitJobs(database.GetDB())
 	// Run tests
 	os.Exit(m.Run())
 }
 
 func TestSetupRouter(t *testing.T) {
-	// Create dummy template files in the current directory for the test
-	os.Create("index.html")
-	os.Create("admin.html")
-	os.Create("login.html")
-	os.Create("error.html")
-	os.Create("log.html")
-	defer os.Remove("index.html")
-	defer os.Remove("admin.html")
-	defer os.Remove("login.html")
-	defer os.Remove("error.html")
-	defer os.Remove("log.html")
+	// Create dummy template and static files for the test
+	os.MkdirAll("web/templates", 0755)
+	os.Create("web/templates/index.html")
+	os.Create("web/templates/admin.html")
+	os.Create("web/templates/login.html")
+	os.Create("web/templates/error.html")
+	os.Create("web/templates/log.html")
+	os.MkdirAll("web/static/css", 0755)
+	os.Create("web/static/css/style.css")
+	os.MkdirAll("web/static/js", 0755)
+	os.Create("web/static/js/main.js")
+
+	defer os.RemoveAll("web")
 
 	config.AppConfig.AppKey = "test-secret"
 	router := SetupRouter()
@@ -59,6 +63,17 @@ func TestSetupRouter(t *testing.T) {
 	req, _ = http.NewRequest("GET", "/unauthorized", nil)
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusForbidden, w.Code)
+
+	// Test static file routes
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/static/css/style.css", nil)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/static/js/main.js", nil)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
 
 	// Test authenticated routes without auth
 	w = httptest.NewRecorder()
@@ -93,4 +108,18 @@ func TestSetupRouter(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+adminToken)
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Test admin POST routes with non-admin user
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/force-generate", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+
+	// Test admin POST routes with admin user
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/force-generate", nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusFound, w.Code) // Expecting a redirect
 }
