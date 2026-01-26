@@ -5,10 +5,10 @@ go 1.24.9
 require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
-	github.com/mattn/go-sqlite3 v1.14.28
-	github.com/shirou/gopsutil/v4 v4.25.11
+	github.com/mattn/go-sqlite3 v1.14.33
+	github.com/shirou/gopsutil/v4 v4.25.12
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/crypto v0.46.0
+	golang.org/x/crypto v0.47.0
 )
 
 require (
@@ -44,11 +44,11 @@ require (
 	github.com/ugorji/go/codec v1.3.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	golang.org/x/arch v0.20.0 // indirect
-	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
+	golang.org/x/net v0.48.0 // indirect
+	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/text v0.33.0 // indirect
 	google.golang.org/protobuf v1.36.9 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/quic-go/quic-go => github.com/quic-go/quic-go v0.57.0
+replace github.com/quic-go/quic-go => github.com/quic-go/quic-go v0.59.0
