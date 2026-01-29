@@ -66,6 +66,12 @@ func HandleDashboard(c *gin.Context) {
 	// --- New Timelapse Data Structure ---
 	// map[TIMELAPSE_TYPE] -> list of videos
 	availableTimelapses := make(map[string][]gin.H)
+	timelapseOrder := []string{"Daily", "Weekly", "Monthly", "Yearly"}
+
+	// Initialize all timelapse types to ensure they appear in the UI
+	for _, typeName := range timelapseOrder {
+		availableTimelapses[typeName] = []gin.H{}
+	}
 
 	// --- Daily 24-Hour Timelapses ---
 	var dailyVideos []gin.H
@@ -129,6 +135,18 @@ func HandleDashboard(c *gin.Context) {
 			}
 		}
 
+		var typeName string
+		switch cfg.Name {
+		case "1_week":
+			typeName = "Weekly"
+		case "1_month":
+			typeName = "Monthly"
+		case "1_year":
+			typeName = "Yearly"
+		default:
+			typeName = strings.Title(strings.ReplaceAll(cfg.Name, "_", " "))
+		}
+
 		if len(otherVideos) > 0 {
 			sort.Slice(otherVideos, func(i, j int) bool {
 				// Simple sort: "Latest" always comes first, then by date string descending
@@ -140,22 +158,9 @@ func HandleDashboard(c *gin.Context) {
 				}
 				return otherVideos[i]["Date"].(string) > otherVideos[j]["Date"].(string)
 			})
-			var typeName string
-			switch cfg.Name {
-			case "1_week":
-				typeName = "Weekly"
-			case "1_month":
-				typeName = "Monthly"
-			case "1_year":
-				typeName = "Yearly"
-			default:
-				typeName = strings.Title(strings.ReplaceAll(cfg.Name, "_", " "))
-			}
 			availableTimelapses[typeName] = otherVideos
 		}
 	}
-
-	videoExists := len(availableTimelapses) > 0
 
 	currentVideoStatus := gin.H{
 		"IsRunning":           models.VideoStatusData.IsRunning,
@@ -170,11 +175,9 @@ func HandleDashboard(c *gin.Context) {
 
 	user, _ := c.Get("user")
 	cachedData := cachedstats.Cache.GetData()
-	timelapseOrder := []string{"Daily", "Weekly", "Monthly", "Yearly"}
 
 	data := gin.H{
 		"Now":                  time.Now().Format("2006-01-02 15:04:05"),
-		"VideoExists":          videoExists,
 		"AvailableTimelapses":  availableTimelapses,
 		"TimelapseOrder":       timelapseOrder,
 		"VideoStatus":          currentVideoStatus,

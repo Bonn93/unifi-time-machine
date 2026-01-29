@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/mem"
 
 	"time-machine/pkg/config"
@@ -21,20 +23,23 @@ import (
 	"time-machine/pkg/util"
 )
 
+var (
+	osPrettyName  string
+	osReleaseOnce sync.Once
+)
+
 // SystemStats holds the CPU and memory usage data.
 type SystemStats struct {
 	mu          sync.RWMutex
-	CPUUsage    string `json:"cpu_usage"`
-	MemoryUsage string `json:"memory_usage"`
-	OS          string `json:"os"`
-	IsReady     bool   `json:"is_ready"`
+	CPUUsage    float64
+	Memory      *mem.VirtualMemoryStat
+	OS          string
+	IsReady     bool
 }
 
 var currentStats = &SystemStats{
-	CPUUsage:    "Loading...",
-	MemoryUsage: "Loading...",
-	OS:          runtime.GOOS,
-	IsReady:     false,
+	OS:      getOSPrettyName(),
+	IsReady: false,
 }
 
 // StartStatsCollector starts a goroutine to periodically fetch system stats.
@@ -53,10 +58,10 @@ func StartStatsCollector() {
 
 			currentStats.mu.Lock()
 			if len(cpuPercent) > 0 {
-				currentStats.CPUUsage = fmt.Sprintf("%.2f%%", cpuPercent[0])
+				currentStats.CPUUsage = cpuPercent[0]
 			}
 			if memInfo != nil {
-				currentStats.MemoryUsage = fmt.Sprintf("%.2f%%", memInfo.UsedPercent)
+				currentStats.Memory = memInfo
 			}
 			currentStats.IsReady = true
 			currentStats.mu.Unlock()
@@ -83,38 +88,34 @@ var GetTotalImagesCount = func() int {
 	return len(GetSnapshotFiles())
 }
 
-var GetImagesDiskUsage = func() string {
-	var totalSize int64
+var GetImagesDiskUsage = func() gin.H {
+	var imageSize int64
 	err := filepath.Walk(config.AppConfig.DataDir, func(_ string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if !info.IsDir() {
-			totalSize += info.Size()
+			imageSize += info.Size()
 		}
 		return err
 	})
 
 	if err != nil {
-		log.Printf("Error calculating disk usage: %v", err)
-		return "N/A"
+		log.Printf("Error calculating image disk usage: %v", err)
+		return gin.H{"error": "N/A"}
 	}
 
-	const (
-		kb = 1024
-		mb = 1024 * kb
-		gb = 1024 * mb
-	)
+	diskStat, err := disk.Usage(config.AppConfig.DataDir)
+	if err != nil {
+		log.Printf("Error getting disk usage stat: %v", err)
+		return gin.H{"error": "N/A"}
+	}
 
-	switch {
-	case totalSize >= gb:
-		return fmt.Sprintf("%.2f GB", float64(totalSize)/float64(gb))
-	case totalSize >= mb:
-		return fmt.Sprintf("%.2f MB", float64(totalSize)/float64(mb))
-	case totalSize >= kb:
-		return fmt.Sprintf("%.2f KB", float64(totalSize)/float64(kb))
-	default:
-		return fmt.Sprintf("%d Bytes", totalSize)
+	return gin.H{
+		"image_usage_gb":    fmt.Sprintf("%.2f GB", float64(imageSize)/1024/1024/1024),
+		"disk_total_gb":     fmt.Sprintf("%.2f GB", float64(diskStat.Total)/1024/1024/1024),
+		"disk_used_gb":      fmt.Sprintf("%.2f GB", float64(diskStat.Used)/1024/1024/1024),
+		"disk_used_percent": fmt.Sprintf("%.2f%%", diskStat.UsedPercent),
 	}
 }
 
@@ -147,16 +148,62 @@ var GetLastProcessedImageName = func() string {
 	return lastRun.Format("2006-01-02-15-04-05") + ".jpg"
 }
 
+// getOSPrettyName reads /etc/os-release and returns the PRETTY_NAME if available.
+// It's cached after the first call.
+func getOSPrettyName() string {
+	osReleaseOnce.Do(func() {
+		if runtime.GOOS != "linux" {
+			osPrettyName = runtime.GOOS
+			return
+		}
+		file, err := os.Open("/etc/os-release")
+		if err != nil {
+			osPrettyName = "linux"
+			return
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "PRETTY_NAME=") {
+				// The value is usually quoted, so trim quotes.
+				osPrettyName = strings.Trim(strings.SplitN(line, "=", 2)[1], `"`)
+				return
+			}
+		}
+		// Fallback if PRETTY_NAME is not found
+		osPrettyName = "linux"
+	})
+	return osPrettyName
+}
+
 var GetSystemInfo = func() gin.H {
 	currentStats.mu.RLock()
 	defer currentStats.mu.RUnlock()
 
-	return gin.H{
+	info := gin.H{
 		"os_type":      currentStats.OS,
-		"cpu_usage":    currentStats.CPUUsage,
-		"memory_usage": currentStats.MemoryUsage,
-		"av1_status":   fmt.Sprintf("Available (%s)", video.PreferredVideoCodec),
+		"cpu_usage":    "Loading...",
+		"memory_usage": "Loading...",
+		"av1_encoder":  fmt.Sprintf("Available (%s)", video.PreferredVideoCodec),
 	}
+
+	if currentStats.IsReady {
+		info["cpu_usage"] = fmt.Sprintf("%.2f%%", currentStats.CPUUsage)
+		if currentStats.Memory != nil {
+			info["memory_usage"] = fmt.Sprintf("%.2f GB / %.2f GB (%.2f%%)",
+				float64(currentStats.Memory.Used)/1024/1024/1024,
+				float64(currentStats.Memory.Total)/1024/1024/1024,
+				currentStats.Memory.UsedPercent,
+			)
+			// Pass raw percentages for frontend coloring
+			info["cpu_usage_raw"] = currentStats.CPUUsage
+			info["memory_usage_raw"] = currentStats.Memory.UsedPercent
+		}
+	}
+
+	return info
 }
 
 // GetAvailableImageDates now scans the flat gallery directory.
@@ -245,3 +292,4 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return !os.IsNotExist(err)
 }
+

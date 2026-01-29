@@ -119,3 +119,13 @@ video {
     border: 1px solid var(--border-color);
     background-color: #000;
 }
+
+pre {
+    background-color: var(--dark-bg);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    padding: 1rem;
+    border-radius: 0.25rem;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}

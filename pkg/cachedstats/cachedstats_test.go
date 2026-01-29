@@ -17,7 +17,14 @@ func TestUpdateAndGetData(t *testing.T) {
 	defer func() { stats.GetTotalImagesCount = originalGetTotalImagesCount }()
 
 	originalGetImagesDiskUsage := stats.GetImagesDiskUsage
-	stats.GetImagesDiskUsage = func() string { return "10 GB" }
+	stats.GetImagesDiskUsage = func() gin.H {
+		return gin.H{
+			"image_usage_gb":    "10.00 GB",
+			"disk_total_gb":     "100.00 GB",
+			"disk_used_gb":      "50.00 GB",
+			"disk_used_percent": "50.00%",
+		}
+	}
 	defer func() { stats.GetImagesDiskUsage = originalGetImagesDiskUsage }()
 
 	originalGetLastImageTime := stats.GetLastImageTime
@@ -63,7 +70,7 @@ func TestUpdateAndGetData(t *testing.T) {
 
 	// Assertions
 	assert.Equal(t, 100, data["total_images"])
-	assert.Equal(t, "10 GB", data["image_size"])
+	assert.Equal(t, "10.00 GB", data["image_size"].(gin.H)["image_usage_gb"])
 	assert.Equal(t, "2023-10-27 10:00:00", data["last_image_time"])
 	assert.Equal(t, "image.jpg", data["last_processed_image"])
 	assert.Equal(t, []string{"2023-10-27"}, data["available_dates"])
@@ -72,12 +79,24 @@ func TestUpdateAndGetData(t *testing.T) {
 	assert.Equal(t, []map[string]string{{"images": "5"}, {"videos": "1"}}, data["daily_gallery"])
 }
 
+func TestGetDataLoading(t *testing.T) {
+	cs := &CachedStats{
+		Data:          make(gin.H),
+		isInitialized: false,
+	}
+	data := cs.GetData()
+	assert.True(t, data["is_loading"].(bool))
+	assert.Equal(t, "Loading...", data["total_images"])
+	assert.Equal(t, "Loading...", data["image_size"])
+}
+
 func TestRunUpdater(t *testing.T) {
 	// This test is to ensure RunUpdater runs without panicking.
 	// A more comprehensive test would involve checking if the data is updated periodically.
 	cs := &CachedStats{
 		Data: make(gin.H),
 	}
-	go cs.RunUpdater()
+	// just test the first update
+	go cs.Update()
 	time.Sleep(1 * time.Second) // Let the updater run once
 }

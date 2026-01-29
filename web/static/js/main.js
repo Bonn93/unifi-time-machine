@@ -1,33 +1,70 @@
-// Go variables passed to JS
-// These are expected to be defined in the HTML template, e.g.:
-// const availableDates = JSON.parse('{{js .AvailableDates}}');
-// const defaultDate = "{{.DefaultGalleryDate}}";
-// const initialGalleryData = JSON.parse('{{js .DefaultGalleryImages}}');
-
+// Go variables passed to JS are expected to be defined in the HTML template.
 document.addEventListener('DOMContentLoaded', () => {
 
-    // --- System Stats Polling ---
-    const cpuUsageEl = document.getElementById('cpu-usage');
-    const memoryUsageEl = document.getElementById('memory-usage');
+    // --- New Dashboard Stats Polling ---
+    const elements = {
+        osType: document.getElementById('os-type'),
+        cpuUsage: document.getElementById('cpu-usage'),
+        memoryUsage: document.getElementById('memory-usage'),
+        av1Encoder: document.getElementById('av1-encoder'),
+        totalImages: document.getElementById('total-images'),
+        imageUsage: document.getElementById('image-usage'),
+        diskUsage: document.getElementById('disk-usage'),
+        lastSnapshotTime: document.getElementById('last-snapshot-time'),
+    };
 
-    async function fetchSystemStats() {
-        try {
-            const response = await fetch('/api/system-stats');
-            const data = await response.json();
-            if (cpuUsageEl) cpuUsageEl.textContent = data.cpu_usage;
-            if (memoryUsageEl) memoryUsageEl.textContent = data.memory_usage;
-        } catch (error) {
-            console.error('Error fetching system stats:', error);
+    const updateUsageColor = (element, value) => {
+        if (!element || value === null || value === undefined) return;
+        
+        element.classList.remove('text-warning', 'text-danger');
+
+        if (value > 95) {
+            element.classList.add('text-danger');
+        } else if (value > 80) {
+            element.classList.add('text-warning');
         }
-    }
+    };
 
-    // Fetch stats immediately and then every 5 seconds
-    if (cpuUsageEl && memoryUsageEl) {
-        fetchSystemStats();
-        setInterval(fetchSystemStats, 5000);
-    }
+    const updateDashboard = (data) => {
+        if (!data) return;
+
+        // System Info
+        if (data.system_info) {
+            elements.osType.textContent = data.system_info.os_type || 'N/A';
+            elements.cpuUsage.textContent = data.system_info.cpu_usage || 'Loading...';
+            elements.memoryUsage.textContent = data.system_info.memory_usage || 'Loading...';
+            elements.av1Encoder.textContent = data.system_info.av1_encoder || 'N/A';
+            updateUsageColor(elements.cpuUsage, data.system_info.cpu_usage_raw);
+            updateUsageColor(elements.memoryUsage, data.system_info.memory_usage_raw);
+        }
+
+        // Storage Statistics
+        elements.totalImages.textContent = data.total_images || 'Loading...';
+        elements.lastSnapshotTime.textContent = data.last_image_time || 'Loading...';
+        if (data.image_size && typeof data.image_size === 'object') {
+            elements.imageUsage.textContent = data.image_size.image_usage_gb || 'N/A';
+            elements.diskUsage.textContent = `${data.image_size.disk_used_gb} / ${data.image_size.disk_total_gb} (${data.image_size.disk_used_percent})`;
+        } else {
+            elements.imageUsage.textContent = data.image_size || 'Loading...';
+            elements.diskUsage.textContent = 'Loading...';
+        }
+    };
+
+    const pollAndUpdateDashboard = async () => {
+        try {
+            const response = await fetch('/api/images');
+            const data = await response.json();
+            updateDashboard(data);
+        } catch (error) {
+            console.error('Error fetching dashboard stats:', error);
+        }
+    };
     
-    // --- New Timelapse Card Logic ---
+    pollAndUpdateDashboard();
+    setInterval(pollAndUpdateDashboard, 5000);
+
+    
+    // --- Timelapse Card Logic ---
     const allTimelapseSelects = document.querySelectorAll('.timelapse-select');
     allTimelapseSelects.forEach(select => {
         select.addEventListener('change', (event) => {
@@ -48,7 +85,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // --- Gallery Logic (Unchanged) ---
+    // --- Gallery Logic ---
     const dateSelect = document.getElementById('date-select');
     if (dateSelect) {
         if (typeof availableDates !== 'undefined' && availableDates) {
@@ -69,6 +106,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
         dateSelect.addEventListener('change', (event) => {
             fetchGallery(event.target.value);
+        });
+    }
+
+    // --- Logout Handler ---
+    const logoutButton = document.querySelector('a[href="/logout"]');
+    if (logoutButton) {
+        logoutButton.addEventListener('click', (event) => {
+            event.preventDefault(); // Stop the browser from navigating to the href
+            fetch('/logout', {
+                method: 'GET',
+            })
+            .then(response => {
+                window.location.href = '/login';
+            })
+            .catch(error => {
+                console.error('Logout failed:', error);
+                window.location.href = '/login';
+            });
         });
     }
 });
