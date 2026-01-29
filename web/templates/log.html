@@ -3,63 +3,54 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FFmpeg Logs</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body {
-            padding: 1rem;
-        }
-        .log-content {
-            background-color: #f8f9fa;
-            border: 1px solid #dee2e6;
-            border-radius: .25rem;
-            padding: 1rem;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            max-height: 80vh;
-            overflow-y: auto;
-        }
-    </style>
+    <title>FFmpeg Logs | UniFi Time Machine</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <div class="container-fluid">
-        <h1 class="mb-4">FFmpeg Logs</h1>
+    <div class="container py-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h1 class="mb-0">FFmpeg Log</h1>
+            <a href="/" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
+            </a>
+        </div>
+        <hr class="text-secondary">
 
-        {{ if .AvailableDates }}
-            <div class="row mb-3">
-                <div class="col-md-4">
-                    <form id="log-date-form" action="/log" method="get">
-                        <div class="input-group">
-                            <label class="input-group-text" for="log-date-select">Select Log Date:</label>
-                            <select class="form-select" id="log-date-select" name="date" onchange="this.form.submit()">
-                                {{ range .AvailableDates }}
-                                    <option value="{{ . }}" {{ if eq . $.SelectedDate }}selected{{ end }}>{{ . }}</option>
-                                {{ end }}
-                            </select>
+        <div class="card">
+            <div class="card-body">
+                {{ if .AvailableDates }}
+                    <div class="row mb-3">
+                        <div class="col-md-5">
+                            <form id="log-date-form" action="/log" method="get">
+                                <div class="input-group">
+                                    <label class="input-group-text" for="log-date-select"><i class="fas fa-calendar-alt me-2"></i>Log Date:</label>
+                                    <select class="form-select" id="log-date-select" name="date" onchange="this.form.submit()">
+                                        {{ range .AvailableDates }}
+                                            <option value="{{ . }}" {{ if eq . $.SelectedDate }}selected{{ end }}>{{ . }}</option>
+                                        {{ end }}
+                                    </select>
+                                </div>
+                            </form>
                         </div>
-                    </form>
-                </div>
-                <div class="col-md-8 text-md-end">
-                    <a href="/" class="btn btn-primary">Back to Dashboard</a>
-                </div>
-            </div>
+                    </div>
 
-            <div class="log-content">
-                <pre>{{ .LogContent }}</pre>
-            </div>
-        {{ else }}
-            <div class="alert alert-info">
-                {{ if .Message }}
-                    {{ .Message }}
+                    <pre class="mt-3">{{ .LogContent }}</pre>
+
                 {{ else }}
-                    No FFmpeg log files found.
+                    <div class="alert alert-info">
+                        {{ if .Message }}
+                            {{ .Message }}
+                        {{ else }}
+                            No FFmpeg log files found.
+                        {{ end }}
+                    </div>
                 {{ end }}
             </div>
-            <a href="/" class="btn btn-primary">Back to Dashboard</a>
-        {{ end }}
-
+        </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

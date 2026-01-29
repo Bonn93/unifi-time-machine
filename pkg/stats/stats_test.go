@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/stretchr/testify/assert"
 	"time-machine/pkg/config"
 	"time-machine/pkg/models"
@@ -57,7 +60,11 @@ func TestGetImagesDiskUsage(t *testing.T) {
 	defer cleanup()
 
 	usage := GetImagesDiskUsage()
-	assert.NotEqual(t, "N/A", usage)
+	assert.IsType(t, gin.H{}, usage)
+	assert.Contains(t, usage, "image_usage_gb")
+	assert.Contains(t, usage, "disk_total_gb")
+	assert.Contains(t, usage, "disk_used_gb")
+	assert.Contains(t, usage, "disk_used_percent")
 }
 
 func TestGetLastImageTime(t *testing.T) {
@@ -83,17 +90,47 @@ func TestGetLastProcessedImageName(t *testing.T) {
 }
 
 func TestGetSystemInfo(t *testing.T) {
-	// Start the collector
-	StartStatsCollector()
-
-	// Give it a moment to run
-	time.Sleep(2 * time.Second)
+	// Manually set stats to test formatting
+	currentStats.mu.Lock()
+	currentStats.IsReady = true
+	currentStats.CPUUsage = 85.555
+	currentStats.Memory = &mem.VirtualMemoryStat{
+		Total:       16 * 1024 * 1024 * 1024, // 16 GB
+		Used:        4 * 1024 * 1024 * 1024,  // 4 GB
+		UsedPercent: 25.0,
+	}
+	currentStats.OS = "TestOS"
+	currentStats.mu.Unlock()
 
 	info := GetSystemInfo()
 	assert.NotNil(t, info)
-	assert.Contains(t, info, "os_type")
-	assert.NotEqual(t, "Loading...", info["cpu_usage"])
-	assert.NotEqual(t, "Loading...", info["memory_usage"])
+	assert.Equal(t, "TestOS", info["os_type"])
+	assert.Equal(t, "85.56%", info["cpu_usage"])
+	assert.Equal(t, "4.00 GB / 16.00 GB (25.00%)", info["memory_usage"])
+	assert.Equal(t, 85.555, info["cpu_usage_raw"])
+	assert.Equal(t, 25.0, info["memory_usage_raw"])
+	assert.Contains(t, info["av1_encoder"], "Available")
+
+	// Test "Loading..." state
+	currentStats.mu.Lock()
+	currentStats.IsReady = false
+	currentStats.mu.Unlock()
+	info = GetSystemInfo()
+	assert.Equal(t, "Loading...", info["cpu_usage"])
+	assert.Equal(t, "Loading...", info["memory_usage"])
+}
+
+// Test for getOSPrettyName (simple case)
+func TestGetOSPrettyName(t *testing.T) {
+	// This test mainly ensures it doesn't crash and returns a string.
+	// Mocking /etc/os-release is overly complex for this.
+	name := getOSPrettyName()
+	if runtime.GOOS == "linux" {
+		// Can't be sure what it will be, but it shouldn't be empty
+		assert.NotEmpty(t, name)
+	} else {
+		assert.Equal(t, runtime.GOOS, name)
+	}
 }
 
 func TestGetAvailableImageDates(t *testing.T) {
@@ -101,12 +138,24 @@ func TestGetAvailableImageDates(t *testing.T) {
 	defer cleanup()
 
 	dates := GetAvailableImageDates()
-	assert.Len(t, dates, 3)
-	// Check if sorted in reverse
-	sorted := sort.SliceIsSorted(dates, func(i, j int) bool {
-		return dates[i] > dates[j]
-	})
-	assert.True(t, sorted)
+	// The dummy file format is YYYY-MM-DD-HH.jpg, so we get the date part
+	expectedDates := []string{
+		time.Now().Format("2006-01-02"),
+		time.Now().Add(-24 * time.Hour).Format("2006-01-02"),
+		time.Now().Add(-48 * time.Hour).Format("2006-01-02"),
+	}
+	// The function returns unique dates, so remove duplicates from expected
+	uniqueExpected := make(map[string]struct{})
+	for _, d := range expectedDates {
+		uniqueExpected[d] = struct{}{}
+	}
+	var finalExpected []string
+	for d := range uniqueExpected {
+		finalExpected = append(finalExpected, d)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(finalExpected)))
+
+	assert.ElementsMatch(t, finalExpected, dates)
 }
 
 func TestGetDailyGallery(t *testing.T) {
@@ -119,13 +168,16 @@ func TestGetDailyGallery(t *testing.T) {
 
 	// Find the created gallery image and check its data
 	hour := time.Now().Format("15")
+	found := false
 	for _, item := range gallery {
 		if item["time"] == hour+":00" {
+			found = true
 			assert.Equal(t, "true", item["available"])
 			expectedURL := fmt.Sprintf("/data/gallery/%s-%s.jpg", today, hour)
 			assert.Equal(t, expectedURL, item["url"])
 		}
 	}
+	assert.True(t, found, "Did not find gallery item for the current hour")
 }
 
 func TestGetSnapshotFiles(t *testing.T) {

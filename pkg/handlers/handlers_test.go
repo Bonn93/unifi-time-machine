@@ -355,13 +355,15 @@ func TestHandleDashboard_VideoGrouping(t *testing.T) {
 
 	// Assertions for videos
 
-	assert.Len(t, result.Videos["Daily"], 2, "Should be 2 daily videos")
+		assert.Len(t, result.Videos["Daily"], 2, "Should be 2 daily videos")
 
-	assert.Len(t, result.Videos["Weekly"], 2, "Should be 2 weekly videos")
+		assert.Len(t, result.Videos["Weekly"], 2, "Should be 2 weekly videos")
 
-	assert.Len(t, result.Videos["Monthly"], 1, "Should be 1 monthly video")
+		assert.Len(t, result.Videos["Monthly"], 1, "Should be 1 monthly video")
 
-	assert.Nil(t, result.Videos["Yearly"], "Yearly should be nil")
+		assert.NotNil(t, result.Videos["Yearly"], "Yearly should not be nil")
+
+		assert.Len(t, result.Videos["Yearly"], 0, "Yearly should be empty")
 
 
 
