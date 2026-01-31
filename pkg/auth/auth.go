@@ -163,5 +163,5 @@ func LoginHandler(c *gin.Context) {
 // LogoutHandler handles user logout requests by clearing the JWT cookie.
 func LogoutHandler(c *gin.Context) {
 	c.SetCookie("jwt_token", "", -1, "/", "", false, true) // Clear the cookie
-	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+	c.Redirect(http.StatusFound, "/login")
 }

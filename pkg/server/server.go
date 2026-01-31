@@ -63,7 +63,7 @@ func SetupRouter() *gin.Engine {
 			adminRoutes.POST("/share", handlers.HandleShareLink)
 		}
 		// Logout endpoint (authenticated)
-		authorized.GET("/logout", auth.LogoutHandler)
+		authorized.POST("/logout", auth.LogoutHandler)
 	}
 
 	return r

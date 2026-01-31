@@ -138,7 +138,8 @@ func TestLogoutHandler(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, http.StatusFound, w.Code)
+	assert.Equal(t, "/login", w.Header().Get("Location"))
 	cookie := w.Header().Get("Set-Cookie")
 	assert.True(t, strings.Contains(cookie, "jwt_token=;"))
 	assert.True(t, strings.Contains(cookie, "Max-Age=0"))

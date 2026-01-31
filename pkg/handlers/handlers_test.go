@@ -71,18 +71,6 @@ func TestHandleLoginGet(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-func TestHandleLogout(t *testing.T) {
-	r := setupTestApp(t)
-	r.GET("/logout", HandleLogout)
-
-	req, _ := http.NewRequest("GET", "/logout", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusFound, w.Code)
-	assert.Equal(t, "/login", w.Header().Get("Location"))
-}
-
 func TestHandleUnauthorized(t *testing.T) {
 	r := setupTestApp(t)
 	r.GET("/unauthorized", HandleUnauthorized)
@@ -216,31 +204,6 @@ func TestHandleCreateUser(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestHandleLoginPost(t *testing.T) {
-	r := setupTestApp(t)
-	database.CreateUser("testuser", "password123", false)
-	r.POST("/login", HandleLoginPost)
-
-	// Test successful login
-	form := "username=testuser&password=password123"
-	req, _ := http.NewRequest("POST", "/login", strings.NewReader(form))
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusFound, w.Code)
-	assert.Equal(t, "/", w.Header().Get("Location"))
-
-	// Test failed login
-	form = "username=testuser&password=wrongpassword"
-	req, _ = http.NewRequest("POST", "/login", strings.NewReader(form))
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	w = httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
 func TestHandleDashboard_VideoGrouping(t *testing.T) {

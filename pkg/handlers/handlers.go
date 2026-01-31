@@ -26,37 +26,9 @@ func HandleForceGenerate(c *gin.Context) {
 
 // --- HANDLERS ---
 
-// HandleLogout clears the session cookie and redirects to the login page.
-func HandleLogout(c *gin.Context) {
-	c.SetCookie("session_token", "", -1, "/", "", false, true) // Clear the session cookie
-	c.Redirect(http.StatusFound, "/login")
-}
-
 // HandleLoginGet renders the login page.
 func HandleLoginGet(c *gin.Context) {
 	c.HTML(http.StatusOK, "login.html", gin.H{})
-}
-
-// HandleLoginPost processes the login form submission.
-func HandleLoginPost(c *gin.Context) {
-	username := c.PostForm("username")
-	password := c.PostForm("password")
-
-	user, authenticated := database.CheckUserCredentials(username, password)
-
-	if !authenticated {
-		c.HTML(http.StatusUnauthorized, "login.html", gin.H{"Error": "Invalid username or password"})
-		return
-	}
-
-	// this needs to be more robust...
-	sessionToken := username + ":" + fmt.Sprintf("%d", time.Now().Unix()) // Simple token
-	c.SetCookie("session_token", sessionToken, 3600, "/", "", false, true)
-
-	// Save the user in the context for subsequent middleware (e.g., admin check)
-	c.Set("user", user)
-
-	c.Redirect(http.StatusFound, "/")
 }
 
 func HandleDashboard(c *gin.Context) {
