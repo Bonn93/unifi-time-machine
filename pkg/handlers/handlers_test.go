@@ -177,6 +177,9 @@ func TestHandleForceGenerate(t *testing.T) {
 
 	assert.Equal(t, http.StatusFound, w.Code)
 	assert.Equal(t, "/", w.Header().Get("Location"))
+
+	// Allow the background job to complete
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestHandleCreateUser(t *testing.T) {
@@ -341,6 +344,16 @@ func TestHandleShareLink(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "shareLink")
+	assert.Contains(t, w.Body.String(), "expiresAt")
+
+	// Test unlimited expiry
+	config.AppConfig.ShareLinkExpiryHours = 0
+	req, _ = http.NewRequest("POST", "/share", strings.NewReader(form))
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"expiresAt":"Never"`)
 
 	// Test missing filePath
 	form = "filePath="

@@ -12,7 +12,13 @@ document.querySelectorAll('.share-btn').forEach(button => {
         .then(data => {
             if (data.shareLink) {
                 const shareLinkInput = document.getElementById('shareLinkInput');
+                const shareLinkExpiry = document.getElementById('shareLinkExpiry');
                 shareLinkInput.value = data.shareLink;
+                if (data.expiresAt === "Never") {
+                    shareLinkExpiry.textContent = "This link does not expire.";
+                } else {
+                    shareLinkExpiry.textContent = `This link is valid until ${new Date(data.expiresAt).toLocaleString()}.`;
+                }
                 const shareLinkModal = new bootstrap.Modal(document.getElementById('shareLinkModal'));
                 shareLinkModal.show();
             }

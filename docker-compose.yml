@@ -63,6 +63,8 @@ services:
       SNAPSHOT_RETENTION_DAYS: '30'
       # The number of days to retain gallery images. Defaults to a high value.
       GALLERY_RETENTION_DAYS: '365'
+      # The number of hours a shared link is valid for. Set to 0 for unlimited.
+      SHARE_LINK_EXPIRY_HOURS: '4'
       
       # --- Directory Settings (Advanced) ---
       # These point to directories inside the container. It's not recommended to change these.

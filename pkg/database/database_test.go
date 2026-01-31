@@ -188,9 +188,11 @@ func TestShareLinks(t *testing.T) {
 	assert.Empty(t, retrievedPath)
 
 	// Test expired link
-	shortDuration := -time.Second
+	shortDuration := time.Millisecond
 	expiredToken, err := CreateShareLink(filePath, shortDuration)
 	assert.NoError(t, err)
+
+	time.Sleep(2 * time.Millisecond) // Wait for the link to expire
 
 	retrievedPath, err = GetSharedFilePath(expiredToken)
 	assert.NoError(t, err)

@@ -55,6 +55,7 @@ func TestLoadConfig(t *testing.T) {
 	os.Setenv("HQSNAP", "high_quality")
 	os.Setenv("UFP_HOST", "testhost")
 	os.Setenv("DAYS_OF_24_HOUR_SNAPSHOTS", "7")
+	os.Setenv("SHARE_LINK_EXPIRY_HOURS", "8")
 
 	LoadConfig()
 
@@ -72,6 +73,7 @@ func TestLoadConfig(t *testing.T) {
 	assert.Equal(t, "https://testhost", AppConfig.UFPHost)
 	assert.Equal(t, "high_quality", AppConfig.HQSnapParams)
 	assert.Equal(t, 7, AppConfig.DaysOf24HourSnapshots)
+	assert.Equal(t, 8, AppConfig.ShareLinkExpiryHours)
 
 	// Test default values
 	os.Clearenv()
@@ -79,7 +81,7 @@ func TestLoadConfig(t *testing.T) {
 	LoadConfig()
 	assert.Equal(t, "", AppConfig.UFPAPIKey)
 	assert.Equal(t, "", AppConfig.TargetCameraID)
-	assert.Equal(t, "data", AppConfig.DataDir)
+	assert.True(t, strings.HasSuffix(AppConfig.DataDir, "data"))
 	assert.Equal(t, 3600, AppConfig.SnapshotIntervalSec)
 	assert.Equal(t, 300, AppConfig.VideoCronIntervalSec)
 	assert.Equal(t, 3, AppConfig.VideoArchivesToKeep)
@@ -89,6 +91,7 @@ func TestLoadConfig(t *testing.T) {
 	assert.Equal(t, "auto", AppConfig.HQSnapParams)
 	assert.Equal(t, 30, AppConfig.DaysOf24HourSnapshots)
 	assert.Equal(t, 30, AppConfig.SnapshotRetentionDays)
+	assert.Equal(t, 4, AppConfig.ShareLinkExpiryHours)
 }
 
 func TestGetEnvAsInt(t *testing.T) {

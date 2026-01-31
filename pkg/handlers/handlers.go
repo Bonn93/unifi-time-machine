@@ -94,14 +94,14 @@ func HandleDashboard(c *gin.Context) {
 				// Extract date from "timelapse_1_week_20231027_150405.webm"
 				datePart := strings.TrimSuffix(strings.TrimPrefix(fileName, archivePrefix), ".webm")
 				parsedTime, err := time.Parse("20060102_150405", datePart)
-				var displayDate string
+				var isoDate string
 				if err != nil {
-					displayDate = datePart // Fallback to raw string
+					isoDate = datePart // Fallback to raw string
 				} else {
-					displayDate = parsedTime.Format("2006-01-02 15:04:05")
+					isoDate = parsedTime.Format(time.RFC3339)
 				}
 				otherVideos = append(otherVideos, gin.H{
-					"Date": displayDate,
+					"Date": isoDate,
 					"Path": "/data/" + fileName,
 				})
 			}
@@ -142,14 +142,14 @@ func HandleDashboard(c *gin.Context) {
 		"CurrentFile":         models.VideoStatusData.CurrentFile,
 	}
 	if models.VideoStatusData.LastRun != nil {
-		currentVideoStatus["LastRun"] = models.VideoStatusData.LastRun.Format("2006-01-02 15:04:05")
+		currentVideoStatus["LastRun"] = models.VideoStatusData.LastRun.Format(time.RFC3339)
 	}
 
 	user, _ := c.Get("user")
 	cachedData := cachedstats.Cache.GetData()
 
 	data := gin.H{
-		"Now":                  time.Now().Format("2006-01-02 15:04:05"),
+		"Now":                  time.Now().Format(time.RFC3339),
 		"AvailableTimelapses":  availableTimelapses,
 		"TimelapseOrder":       timelapseOrder,
 		"VideoStatus":          currentVideoStatus,
@@ -160,6 +160,7 @@ func HandleDashboard(c *gin.Context) {
 		"DefaultGalleryImages": cachedData["daily_gallery"],
 		"AvailableDates":       cachedData["available_dates"],
 		"User":                 user.(*models.User),
+		"DateFormat":           config.AppConfig.DateFormat,
 	}
 
 	c.HTML(http.StatusOK, "index.html", data)
@@ -403,18 +404,29 @@ func HandleShareLink(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
 	}
-	
-	token, err := database.CreateShareLink(filePath, time.Hour*4)
+
+	var expiry time.Duration
+	if config.AppConfig.ShareLinkExpiryHours > 0 {
+		expiry = time.Hour * time.Duration(config.AppConfig.ShareLinkExpiryHours)
+	} else {
+		expiry = 0 // Unlimited
+	}
+
+	token, err := database.CreateShareLink(filePath, expiry)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create share link"})
 		return
 	}
 
 	shareLink := fmt.Sprintf("%s/public/%s", c.Request.Host, token)
-	c.JSON(http.StatusOK, gin.H{
-		"shareLink": shareLink,
-		"expiresAt": time.Now().Add(time.Hour * 4).Format(time.RFC1123),
-	})
+	response := gin.H{"shareLink": shareLink}
+	if expiry > 0 {
+		response["expiresAt"] = time.Now().Add(expiry).Format(time.RFC3339)
+	} else {
+		response["expiresAt"] = "Never"
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func HandlePublicLink(c *gin.Context) {

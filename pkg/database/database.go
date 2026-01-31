@@ -330,7 +330,13 @@ func CreateShareLink(filePath string, duration time.Duration) (string, error) {
 	hash := sha256.Sum256(randomBytes)
 	token := hex.EncodeToString(hash[:])
 
-	expiresAt := time.Now().Add(duration)
+	var expiresAt time.Time
+	if duration > 0 {
+		expiresAt = time.Now().Add(duration)
+	} else {
+		// "Unlimited" links, set expiry far in the future
+		expiresAt = time.Now().AddDate(100, 0, 0)
+	}
 
 	_, err := db.Exec("INSERT INTO shared_links (token, file_path, expires_at) VALUES (?, ?, ?)", token, filePath, expiresAt)
 	if err != nil {
