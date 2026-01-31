@@ -95,3 +95,71 @@ func TestGetDB(t *testing.T) {
 	defer db.Close()
 	assert.Equal(t, db, GetDB())
 }
+
+func TestGetAllUsers(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	err := CreateUser("user1", "pass1", false)
+	assert.NoError(t, err)
+	err = CreateUser("user2", "pass2", true)
+	assert.NoError(t, err)
+
+	users, err := GetAllUsers()
+	assert.NoError(t, err)
+	assert.Len(t, users, 2)
+
+	assert.Equal(t, "user1", users[0].Username)
+	assert.False(t, users[0].IsAdmin)
+	assert.Equal(t, "user2", users[1].Username)
+	assert.True(t, users[1].IsAdmin)
+}
+
+func TestDeleteUser(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	err := CreateUser("testuser", "password", false)
+	assert.NoError(t, err)
+
+	exists, err := UserExists("testuser")
+	assert.NoError(t, err)
+	assert.True(t, exists)
+
+	err = DeleteUser("testuser")
+	assert.NoError(t, err)
+
+	exists, err = UserExists("testuser")
+	assert.NoError(t, err)
+	assert.False(t, exists)
+
+	// Test deleting a non-existent user
+	err = DeleteUser("nonexistentuser")
+	assert.Error(t, err)
+}
+
+func TestUpdateUserPassword(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	// Create a user
+	err := CreateUser("testuser", "oldpassword", false)
+	assert.NoError(t, err)
+
+	// Update the password
+	err = UpdateUserPassword("testuser", "newpassword")
+	assert.NoError(t, err)
+
+	// Check credentials with the new password
+	user, authenticated := CheckUserCredentials("testuser", "newpassword")
+	assert.True(t, authenticated)
+	assert.NotNil(t, user)
+
+	// Check credentials with the old password
+	_, authenticated = CheckUserCredentials("testuser", "oldpassword")
+	assert.False(t, authenticated)
+
+	// Test updating password for a non-existent user
+	err = UpdateUserPassword("nonexistentuser", "newpassword")
+	assert.Error(t, err)
+}

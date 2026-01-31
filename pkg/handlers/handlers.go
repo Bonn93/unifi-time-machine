@@ -284,8 +284,19 @@ func HandleDailyGallery(c *gin.Context) {
 
 func HandleAdminPage(c *gin.Context) {
 	user, _ := c.Get("user")
+	users, err := database.GetAllUsers()
+	if err != nil {
+		c.HTML(http.StatusInternalServerError, "admin.html", gin.H{
+			"User":        user.(*models.User),
+			"message":     fmt.Sprintf("Error fetching users: %v", err),
+			"messageType": "error",
+		})
+		return
+	}
+
 	c.HTML(http.StatusOK, "admin.html", gin.H{
-		"User": user.(*models.User),
+		"User":  user.(*models.User),
+		"Users": users,
 	})
 }
 
@@ -315,6 +326,78 @@ func HandleCreateUser(c *gin.Context) {
 	templateData["message"] = fmt.Sprintf("Successfully created user: %s", username)
 	templateData["messageType"] = "success"
 	c.HTML(http.StatusOK, "admin.html", templateData)
+}
+
+func HandleDeleteUser(c *gin.Context) {
+	username := c.PostForm("username")
+	user, _ := c.Get("user")
+	loggedInUser := user.(*models.User)
+
+	// Prevent a user from deleting themselves
+	if loggedInUser.Username == username {
+		users, err := database.GetAllUsers()
+		if err != nil {
+			// Handle error fetching users, perhaps render an error page
+			c.HTML(http.StatusInternalServerError, "error.html", gin.H{"Message": "Failed to fetch user list."})
+			return
+		}
+		c.HTML(http.StatusBadRequest, "admin.html", gin.H{
+			"User":        loggedInUser,
+			"Users":       users,
+			"message":     "You cannot delete your own account.",
+			"messageType": "error",
+		})
+		return
+	}
+
+	err := database.DeleteUser(username)
+	if err != nil {
+		users, _ := database.GetAllUsers()
+		c.HTML(http.StatusInternalServerError, "admin.html", gin.H{
+			"User":        loggedInUser,
+			"Users":       users,
+			"message":     fmt.Sprintf("Error deleting user: %v", err),
+			"messageType": "error",
+		})
+		return
+	}
+
+	// Redirect to the admin page with a success message
+	// Note: Using query parameters for flash messages is simple but has limitations.
+	// A more robust solution would use session-based flash messages.
+	c.Redirect(http.StatusFound, "/admin")
+}
+
+func HandleChangePassword(c *gin.Context) {
+	username := c.PostForm("username")
+	newPassword := c.PostForm("newPassword")
+	user, _ := c.Get("user")
+	loggedInUser := user.(*models.User)
+
+	if newPassword == "" {
+		users, _ := database.GetAllUsers()
+		c.HTML(http.StatusBadRequest, "admin.html", gin.H{
+			"User":        loggedInUser,
+			"Users":       users,
+			"message":     "Password cannot be empty.",
+			"messageType": "error",
+		})
+		return
+	}
+
+	err := database.UpdateUserPassword(username, newPassword)
+	if err != nil {
+		users, _ := database.GetAllUsers()
+		c.HTML(http.StatusInternalServerError, "admin.html", gin.H{
+			"User":        loggedInUser,
+			"Users":       users,
+			"message":     fmt.Sprintf("Error changing password: %v", err),
+			"messageType": "error",
+		})
+		return
+	}
+
+	c.Redirect(http.StatusFound, "/admin")
 }
 
 // HandleUnauthorized renders a user-friendly unauthorized error page.

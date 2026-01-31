@@ -57,6 +57,8 @@ func SetupRouter() *gin.Engine {
 			adminRoutes.POST("/force-generate", handlers.HandleForceGenerate)
 			adminRoutes.GET("/admin", handlers.HandleAdminPage) // Note: removed trailing slash for consistency
 			adminRoutes.POST("/admin/users", handlers.HandleCreateUser)
+			adminRoutes.POST("/admin/users/delete", handlers.HandleDeleteUser)
+			adminRoutes.POST("/admin/users/password", handlers.HandleChangePassword)
 		}
 		// Logout endpoint (authenticated)
 		authorized.GET("/logout", auth.LogoutHandler)

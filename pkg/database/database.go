@@ -225,6 +225,80 @@ func GetUserByUsername(username string) (*models.User, error) {
 	return &user, nil
 }
 
+// GetAllUsers retrieves all users from the database.
+func GetAllUsers() ([]models.User, error) {
+	rows, err := db.Query("SELECT id, username, is_admin FROM users ORDER BY username")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []models.User
+	for rows.Next() {
+		var user models.User
+		var isAdminInt int
+		if err := rows.Scan(&user.ID, &user.Username, &isAdminInt); err != nil {
+			return nil, fmt.Errorf("failed to scan user row: %w", err)
+		}
+		user.IsAdmin = (isAdminInt == 1)
+		users = append(users, user)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error during user rows iteration: %w", err)
+	}
+
+	return users, nil
+}
+
+// DeleteUser deletes a user from the database.
+func DeleteUser(username string) error {
+	// You might want to prevent a user from deleting themselves.
+	// This logic would typically be in the handler, not the database layer.
+
+	result, err := db.Exec("DELETE FROM users WHERE username = ?", username)
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("user '%s' not found", username)
+	}
+
+	log.Printf("Successfully deleted user: %s", username)
+	return nil
+}
+
+// UpdateUserPassword updates a user's password in the database.
+func UpdateUserPassword(username, newPassword string) error {
+	passwordHash, err := HashPassword(newPassword)
+	if err != nil {
+		return fmt.Errorf("failed to hash new password: %w", err)
+	}
+
+	result, err := db.Exec("UPDATE users SET password_hash = ? WHERE username = ?", passwordHash, username)
+	if err != nil {
+		return fmt.Errorf("failed to update password for user '%s': %w", username, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("user '%s' not found", username)
+	}
+
+	log.Printf("Successfully updated password for user: %s", username)
+	return nil
+}
+
 // GetDB returns the database connection pool.
 func GetDB() *sql.DB {
 	return db

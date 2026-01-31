@@ -96,8 +96,87 @@
                 {{ end }}
             </div>
         </div>
+
+        <div class="card mt-4">
+            <div class="card-header"><i class="fas fa-users me-2"></i>Existing Users</div>
+            <div class="card-body">
+                <table class="table table-dark table-striped">
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Admin</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{ range .Users }}
+                        <tr>
+                            <td>{{ .Username }}</td>
+                            <td>
+                                {{ if .IsAdmin }}
+                                <i class="fas fa-check-circle text-success"></i>
+                                {{ else }}
+                                <i class="fas fa-times-circle text-danger"></i>
+                                {{ end }}
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#changePasswordModal" data-username="{{ .Username }}">
+                                    <i class="fas fa-key me-1"></i> Change Password
+                                </button>
+                                <form action="/admin/users/delete" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this user?');">
+                                    <input type="hidden" name="username" value="{{ .Username }}">
+                                    <button type="submit" class="btn btn-sm btn-danger">
+                                        <i class="fas fa-trash-alt me-1"></i> Delete
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {{ else }}
+                        <tr>
+                            <td colspan="3" class="text-center">No users found.</td>
+                        </tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div class="modal fade" id="changePasswordModal" tabindex="-1" aria-labelledby="changePasswordModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content card">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="changePasswordModalLabel">Change Password</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="/admin/users/password" method="POST">
+                    <div class="modal-body">
+                        <input type="hidden" name="username" id="modalUsername">
+                        <div class="mb-3">
+                            <label for="newPassword" class="form-label">New Password</label>
+                            <input type="password" class="form-control" id="newPassword" name="newPassword" required>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        <button type="submit" class="btn btn-primary">Save changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        var changePasswordModal = document.getElementById('changePasswordModal')
+        changePasswordModal.addEventListener('show.bs.modal', function (event) {
+            var button = event.relatedTarget
+            var username = button.getAttribute('data-username')
+            var modalUsernameInput = changePasswordModal.querySelector('#modalUsername')
+            modalUsernameInput.value = username
+        })
+    </script>
 </body>
 </html>
