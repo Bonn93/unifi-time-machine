@@ -294,10 +294,17 @@ func HandleAdminPage(c *gin.Context) {
 		return
 	}
 
-	c.HTML(http.StatusOK, "admin.html", gin.H{
+	successMessage := c.Query("success")
+	data := gin.H{
 		"User":  user.(*models.User),
 		"Users": users,
-	})
+	}
+	if successMessage != "" {
+		data["message"] = successMessage
+		data["messageType"] = "success"
+	}
+
+	c.HTML(http.StatusOK, "admin.html", data)
 }
 
 func HandleCreateUser(c *gin.Context) {
@@ -309,6 +316,8 @@ func HandleCreateUser(c *gin.Context) {
 	templateData := gin.H{"User": user.(*models.User)}
 
 	if username == "" || password == "" {
+		users, _ := database.GetAllUsers()
+		templateData["Users"] = users
 		templateData["message"] = "Username and password cannot be empty."
 		templateData["messageType"] = "error"
 		c.HTML(http.StatusBadRequest, "admin.html", templateData)
@@ -317,15 +326,15 @@ func HandleCreateUser(c *gin.Context) {
 
 	err := database.CreateUser(username, password, isAdmin)
 	if err != nil {
+		users, _ := database.GetAllUsers()
+		templateData["Users"] = users
 		templateData["message"] = fmt.Sprintf("Error creating user: %v", err)
 		templateData["messageType"] = "error"
 		c.HTML(http.StatusInternalServerError, "admin.html", templateData)
 		return
 	}
 
-	templateData["message"] = fmt.Sprintf("Successfully created user: %s", username)
-	templateData["messageType"] = "success"
-	c.HTML(http.StatusOK, "admin.html", templateData)
+	c.Redirect(http.StatusFound, "/admin?success=User+created+successfully")
 }
 
 func HandleDeleteUser(c *gin.Context) {

@@ -205,7 +205,8 @@ func TestHandleCreateUser(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, http.StatusFound, w.Code)
+	assert.Equal(t, "/admin?success=User+created+successfully", w.Header().Get("Location"))
 
 	// Test empty username
 	form = "username=&password=newpassword&isAdmin=on"
