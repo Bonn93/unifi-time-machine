@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"time-machine/pkg/config"
@@ -162,4 +163,51 @@ func TestUpdateUserPassword(t *testing.T) {
 	// Test updating password for a non-existent user
 	err = UpdateUserPassword("nonexistentuser", "newpassword")
 	assert.Error(t, err)
+}
+
+func TestShareLinks(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	filePath := "/path/to/file.mp4"
+	duration := time.Hour * 4
+
+	// Test link creation
+	token, err := CreateShareLink(filePath, duration)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, token)
+
+	// Test getting a valid link
+	retrievedPath, err := GetSharedFilePath(token)
+	assert.NoError(t, err)
+	assert.Equal(t, filePath, retrievedPath)
+
+	// Test getting a non-existent link
+	retrievedPath, err = GetSharedFilePath("invalidtoken")
+	assert.NoError(t, err)
+	assert.Empty(t, retrievedPath)
+
+	// Test expired link
+	shortDuration := -time.Second
+	expiredToken, err := CreateShareLink(filePath, shortDuration)
+	assert.NoError(t, err)
+
+	retrievedPath, err = GetSharedFilePath(expiredToken)
+	assert.NoError(t, err)
+	assert.Empty(t, retrievedPath)
+
+	// Test deleting expired links
+	err = DeleteExpiredShareLinks()
+	assert.NoError(t, err)
+
+	// Verify the expired link is gone
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM shared_links WHERE token = ?", expiredToken).Scan(&count)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, count)
+
+	// Verify the valid link is still there
+	err = db.QueryRow("SELECT COUNT(*) FROM shared_links WHERE token = ?", token).Scan(&count)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
 }

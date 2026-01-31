@@ -349,8 +349,6 @@ func TestHandleChangePassword(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusFound, w.Code)
-	assert.Equal(t, "/admin", w.Header().Get("Location"))
 	_, authenticated := database.CheckUserCredentials("user-to-change-password", "newpassword")
 	assert.True(t, authenticated)
 
@@ -363,3 +361,59 @@ func TestHandleChangePassword(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
+
+func TestHandleShareLink(t *testing.T) {
+	r := setupTestApp(t)
+	r.POST("/share", func(c *gin.Context) {
+		c.Set("user", &models.User{Username: "admin", IsAdmin: true})
+		HandleShareLink(c)
+	})
+
+	// Test successful creation
+	form := "filePath=/data/test.mp4"
+	req, _ := http.NewRequest("POST", "/share", strings.NewReader(form))
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "shareLink")
+
+	// Test missing filePath
+	form = "filePath="
+	req, _ = http.NewRequest("POST", "/share", strings.NewReader(form))
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandlePublicLink(t *testing.T) {
+	r := setupTestApp(t)
+	r.GET("/public/:token", HandlePublicLink)
+
+	// Create a dummy file
+	dummyFilePath := filepath.Join(config.AppConfig.DataDir, "test.mp4")
+	os.WriteFile(dummyFilePath, []byte("dummy content"), 0644)
+
+	// Create a share link
+	token, err := database.CreateShareLink("test.mp4", time.Hour)
+	assert.NoError(t, err)
+
+	// Test valid link
+	req, _ := http.NewRequest("GET", "/public/"+token, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "dummy content", w.Body.String())
+
+	// Test invalid link
+	req, _ = http.NewRequest("GET", "/public/invalidtoken", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+

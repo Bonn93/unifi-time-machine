@@ -2,13 +2,16 @@ package database
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 	_ "github.com/mattn/go-sqlite3"
@@ -88,6 +91,19 @@ func InitDB() {
 	if err != nil {
 		log.Fatalf("Failed to create trigger for jobs table: %v", err)
 	}
+
+	createSharedLinksTableSQL := `CREATE TABLE IF NOT EXISTS shared_links (
+		"id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+		"token" TEXT NOT NULL UNIQUE,
+		"file_path" TEXT NOT NULL,
+		"expires_at" DATETIME NOT NULL
+	);`
+
+	_, err = db.Exec(createSharedLinksTableSQL)
+	if err != nil {
+		log.Fatalf("Failed to create shared_links table: %v", err)
+	}
+	log.Println("shared_links table created successfully.")
 }
 
 // HashPassword generates an Argon2id hash of the password.
@@ -302,5 +318,63 @@ func UpdateUserPassword(username, newPassword string) error {
 // GetDB returns the database connection pool.
 func GetDB() *sql.DB {
 	return db
+}
+
+// CreateShareLink generates a new share link, stores it in the database, and returns the token.
+func CreateShareLink(filePath string, duration time.Duration) (string, error) {
+	// Generate a random token
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", fmt.Errorf("failed to generate random bytes: %w", err)
+	}
+	hash := sha256.Sum256(randomBytes)
+	token := hex.EncodeToString(hash[:])
+
+	expiresAt := time.Now().Add(duration)
+
+	_, err := db.Exec("INSERT INTO shared_links (token, file_path, expires_at) VALUES (?, ?, ?)", token, filePath, expiresAt)
+	if err != nil {
+		return "", fmt.Errorf("failed to create share link: %w", err)
+	}
+
+	return token, nil
+}
+
+// GetSharedFilePath retrieves the file path for a given token, checking for expiration.
+func GetSharedFilePath(token string) (string, error) {
+	var filePath string
+	var expiresAt time.Time
+	err := db.QueryRow("SELECT file_path, expires_at FROM shared_links WHERE token = ?", token).Scan(&filePath, &expiresAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil // Link not found
+		}
+		return "", fmt.Errorf("failed to get shared file path: %w", err)
+	}
+
+	if time.Now().After(expiresAt) {
+		return "", nil // Link expired
+	}
+
+	return filePath, nil
+}
+
+// DeleteExpiredShareLinks deletes all expired share links from the database.
+func DeleteExpiredShareLinks() error {
+	result, err := db.Exec("DELETE FROM shared_links WHERE expires_at < ?", time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to delete expired share links: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected > 0 {
+		log.Printf("Deleted %d expired share links", rowsAffected)
+	}
+
+	return nil
 }
 

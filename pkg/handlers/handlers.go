@@ -413,3 +413,61 @@ func HandleChangePassword(c *gin.Context) {
 func HandleUnauthorized(c *gin.Context) {
 	c.HTML(http.StatusForbidden, "error.html", gin.H{"Message": "Unauthorized Action"})
 }
+
+func HandleShareLink(c *gin.Context) {
+	filePath := c.PostForm("filePath")
+	if filePath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "filePath is required"})
+		return
+	}
+
+	// Make sure the file path is within the data directory to prevent directory traversal
+	absFilePath, err := filepath.Abs(filepath.Join(config.AppConfig.DataDir, filepath.Base(filePath)))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve file path"})
+		return
+	}
+	if !strings.HasPrefix(absFilePath, config.AppConfig.DataDir) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+	
+	token, err := database.CreateShareLink(filePath, time.Hour*4)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create share link"})
+		return
+	}
+
+	shareLink := fmt.Sprintf("%s/public/%s", c.Request.Host, token)
+	c.JSON(http.StatusOK, gin.H{
+		"shareLink": shareLink,
+		"expiresAt": time.Now().Add(time.Hour * 4).Format(time.RFC1123),
+	})
+}
+
+func HandlePublicLink(c *gin.Context) {
+	token := c.Param("token")
+	filePath, err := database.GetSharedFilePath(token)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Error retrieving file path")
+		return
+	}
+
+	if filePath == "" {
+		c.String(http.StatusNotFound, "Link not found or expired")
+		return
+	}
+
+	// Again, ensure the path is safe
+	absFilePath, err := filepath.Abs(filepath.Join(config.AppConfig.DataDir, filepath.Base(filePath)))
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to resolve file path")
+		return
+	}
+	if !strings.HasPrefix(absFilePath, config.AppConfig.DataDir) {
+		c.String(http.StatusForbidden, "Access denied")
+		return
+	}
+
+	c.File(absFilePath)
+}

@@ -29,6 +29,7 @@ func SetupRouter() *gin.Engine {
 	// Login API endpoint (POST) - handles login logic and JWT issuance
 	r.POST("/api/login", auth.LoginHandler)
 	r.GET("/unauthorized", handlers.HandleUnauthorized)
+	r.GET("/public/:token", handlers.HandlePublicLink)
 
 	// Static files for CSS and JS
 	r.Static("/static", "./web/static")
@@ -59,6 +60,7 @@ func SetupRouter() *gin.Engine {
 			adminRoutes.POST("/admin/users", handlers.HandleCreateUser)
 			adminRoutes.POST("/admin/users/delete", handlers.HandleDeleteUser)
 			adminRoutes.POST("/admin/users/password", handlers.HandleChangePassword)
+			adminRoutes.POST("/share", handlers.HandleShareLink)
 		}
 		// Logout endpoint (authenticated)
 		authorized.GET("/logout", auth.LogoutHandler)
