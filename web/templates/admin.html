@@ -100,12 +100,12 @@
         <div class="card mt-4">
             <div class="card-header"><i class="fas fa-users me-2"></i>Existing Users</div>
             <div class="card-body">
-                <table class="table table-dark table-striped table-sm">
+                <table class="table table-dark table-striped">
                     <thead>
                         <tr>
                             <th>Username</th>
                             <th>Admin</th>
-                            <th class="text-end">Actions</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -119,18 +119,16 @@
                                 <i class="fas fa-times-circle text-danger"></i>
                                 {{ end }}
                             </td>
-                            <td class="text-end">
-                                <div class="btn-group btn-group-sm">
-                                    <button class="btn btn-outline-warning" data-bs-toggle="modal" data-bs-target="#changePasswordModal" data-username="{{ .Username }}" data-bs-toggle="tooltip" title="Change Password">
-                                        <i class="fas fa-key"></i>
+                            <td>
+                                <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#changePasswordModal" data-username="{{ .Username }}">
+                                    <i class="fas fa-key me-1"></i> Change Password
+                                </button>
+                                <form action="/admin/users/delete" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this user?');">
+                                    <input type="hidden" name="username" value="{{ .Username }}">
+                                    <button type="submit" class="btn btn-sm btn-danger">
+                                        <i class="fas fa-trash-alt me-1"></i> Delete
                                     </button>
-                                    <form action="/admin/users/delete" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete user \'{{ .Username }}\'?');">
-                                        <input type="hidden" name="username" value="{{ .Username }}">
-                                        <button type="submit" class="btn btn-outline-danger" data-bs-toggle="tooltip" title="Delete User">
-                                            <i class="fas fa-trash-alt"></i>
-                                        </button>
-                                    </form>
-                                </div>
+                                </form>
                             </td>
                         </tr>
                         {{ else }}
@@ -172,12 +170,6 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
-        // Initialize tooltips
-        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-            return new bootstrap.Tooltip(tooltipTriggerEl)
-        })
-
         var changePasswordModal = document.getElementById('changePasswordModal')
         changePasswordModal.addEventListener('show.bs.modal', function (event) {
             var button = event.relatedTarget
