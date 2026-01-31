@@ -30,6 +30,8 @@ type Config struct {
 	DaysOf24HourSnapshots int
 	SnapshotRetentionDays int
 	GalleryRetentionDays  int
+	ShareLinkExpiryHours int
+	DateFormat           string
 }
 
 // AppConfig is the global application configuration.
@@ -117,44 +119,102 @@ func LoadConfig() {
 
 				SnapshotRetentionDays: getEnvAsInt("SNAPSHOT_RETENTION_DAYS", 30),
 				GalleryRetentionDays:  getEnvAsInt("GALLERY_RETENTION_DAYS", 365),
+				ShareLinkExpiryHours: getEnvAsInt("SHARE_LINK_EXPIRY_HOURS", 4),
+				DateFormat:           getEnv("DATE_FORMAT", "dd/MM/yyyy"),
 
 			}
 
 
 
-	// Validate APP_KEY
-
-	if AppConfig.AppKey == "" {
-
-		log.Fatal("FATAL: APP_KEY environment variable must be set.")
-
-	}
-
-	_, err := base64.StdEncoding.DecodeString(AppConfig.AppKey)
-
-	if err != nil {
-
-		log.Fatalf("FATAL: APP_KEY is not a valid base64 encoded string: %v", err)
-
-	}
+		// Validate APP_KEY
 
 
 
-	AppConfig.SnapshotsDir = filepath.Join(AppConfig.DataDir, AppConfig.SnapshotsDir)
-
-	AppConfig.GalleryDir = filepath.Join(AppConfig.DataDir, AppConfig.GalleryDir)
+		if AppConfig.AppKey == "" {
 
 
 
-	// Ensure UFP_HOST has a protocol scheme
+			log.Fatal("FATAL: APP_KEY environment variable must be set.")
 
-	AppConfig.UFPHost = getEnv("UFP_HOST", "")
 
-	if AppConfig.UFPHost != "" && !strings.Contains(AppConfig.UFPHost, "://") {
 
-		AppConfig.UFPHost = "https://" + AppConfig.UFPHost
+		}
 
-	}
+
+
+		_, err := base64.StdEncoding.DecodeString(AppConfig.AppKey)
+
+
+
+		if err != nil {
+
+
+
+			log.Fatalf("FATAL: APP_KEY is not a valid base64 encoded string: %v", err)
+
+
+
+		}
+
+
+
+	
+
+
+
+		// Convert DataDir to absolute path
+
+
+
+		AppConfig.DataDir, err = filepath.Abs(AppConfig.DataDir)
+
+
+
+		if err != nil {
+
+
+
+			log.Fatalf("FATAL: Could not get absolute path for DataDir: %v", err)
+
+
+
+		}
+
+
+
+	
+
+
+
+		AppConfig.SnapshotsDir = filepath.Join(AppConfig.DataDir, AppConfig.SnapshotsDir)
+
+
+
+		AppConfig.GalleryDir = filepath.Join(AppConfig.DataDir, AppConfig.GalleryDir)
+
+
+
+	
+
+
+
+		// Ensure UFP_HOST has a protocol scheme
+
+
+
+		AppConfig.UFPHost = getEnv("UFP_HOST", "")
+
+
+
+		if AppConfig.UFPHost != "" && !strings.Contains(AppConfig.UFPHost, "://") {
+
+
+
+			AppConfig.UFPHost = "https://" + AppConfig.UFPHost
+
+
+
+		}
 
 
 
@@ -171,6 +231,12 @@ func LoadConfig() {
 	log.Printf("Days of 24-Hour Timelapses: %d", AppConfig.DaysOf24HourSnapshots)
 	log.Printf("Snapshot Retention Days: %d", AppConfig.SnapshotRetentionDays)
 	log.Printf("Gallery Retention Days: %d", AppConfig.GalleryRetentionDays)
+	if AppConfig.ShareLinkExpiryHours > 0 {
+		log.Printf("Share Link Expiry: %d hours", AppConfig.ShareLinkExpiryHours)
+	} else {
+		log.Printf("Share Link Expiry: Unlimited")
+	}
+	log.Printf("Date Format: %s", AppConfig.DateFormat)
 	log.Println("---------------------------------")
 }
 

@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"time-machine/pkg/config"
@@ -94,4 +95,121 @@ func TestGetDB(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 	assert.Equal(t, db, GetDB())
+}
+
+func TestGetAllUsers(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	err := CreateUser("user1", "pass1", false)
+	assert.NoError(t, err)
+	err = CreateUser("user2", "pass2", true)
+	assert.NoError(t, err)
+
+	users, err := GetAllUsers()
+	assert.NoError(t, err)
+	assert.Len(t, users, 2)
+
+	assert.Equal(t, "user1", users[0].Username)
+	assert.False(t, users[0].IsAdmin)
+	assert.Equal(t, "user2", users[1].Username)
+	assert.True(t, users[1].IsAdmin)
+}
+
+func TestDeleteUser(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	err := CreateUser("testuser", "password", false)
+	assert.NoError(t, err)
+
+	exists, err := UserExists("testuser")
+	assert.NoError(t, err)
+	assert.True(t, exists)
+
+	err = DeleteUser("testuser")
+	assert.NoError(t, err)
+
+	exists, err = UserExists("testuser")
+	assert.NoError(t, err)
+	assert.False(t, exists)
+
+	// Test deleting a non-existent user
+	err = DeleteUser("nonexistentuser")
+	assert.Error(t, err)
+}
+
+func TestUpdateUserPassword(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	// Create a user
+	err := CreateUser("testuser", "oldpassword", false)
+	assert.NoError(t, err)
+
+	// Update the password
+	err = UpdateUserPassword("testuser", "newpassword")
+	assert.NoError(t, err)
+
+	// Check credentials with the new password
+	user, authenticated := CheckUserCredentials("testuser", "newpassword")
+	assert.True(t, authenticated)
+	assert.NotNil(t, user)
+
+	// Check credentials with the old password
+	_, authenticated = CheckUserCredentials("testuser", "oldpassword")
+	assert.False(t, authenticated)
+
+	// Test updating password for a non-existent user
+	err = UpdateUserPassword("nonexistentuser", "newpassword")
+	assert.Error(t, err)
+}
+
+func TestShareLinks(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	filePath := "/path/to/file.mp4"
+	duration := time.Hour * 4
+
+	// Test link creation
+	token, err := CreateShareLink(filePath, duration)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, token)
+
+	// Test getting a valid link
+	retrievedPath, err := GetSharedFilePath(token)
+	assert.NoError(t, err)
+	assert.Equal(t, filePath, retrievedPath)
+
+	// Test getting a non-existent link
+	retrievedPath, err = GetSharedFilePath("invalidtoken")
+	assert.NoError(t, err)
+	assert.Empty(t, retrievedPath)
+
+	// Test expired link
+	shortDuration := time.Millisecond
+	expiredToken, err := CreateShareLink(filePath, shortDuration)
+	assert.NoError(t, err)
+
+	time.Sleep(2 * time.Millisecond) // Wait for the link to expire
+
+	retrievedPath, err = GetSharedFilePath(expiredToken)
+	assert.NoError(t, err)
+	assert.Empty(t, retrievedPath)
+
+	// Test deleting expired links
+	err = DeleteExpiredShareLinks()
+	assert.NoError(t, err)
+
+	// Verify the expired link is gone
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM shared_links WHERE token = ?", expiredToken).Scan(&count)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, count)
+
+	// Verify the valid link is still there
+	err = db.QueryRow("SELECT COUNT(*) FROM shared_links WHERE token = ?", token).Scan(&count)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
 }

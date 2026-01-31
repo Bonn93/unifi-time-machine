@@ -26,37 +26,9 @@ func HandleForceGenerate(c *gin.Context) {
 
 // --- HANDLERS ---
 
-// HandleLogout clears the session cookie and redirects to the login page.
-func HandleLogout(c *gin.Context) {
-	c.SetCookie("session_token", "", -1, "/", "", false, true) // Clear the session cookie
-	c.Redirect(http.StatusFound, "/login")
-}
-
 // HandleLoginGet renders the login page.
 func HandleLoginGet(c *gin.Context) {
 	c.HTML(http.StatusOK, "login.html", gin.H{})
-}
-
-// HandleLoginPost processes the login form submission.
-func HandleLoginPost(c *gin.Context) {
-	username := c.PostForm("username")
-	password := c.PostForm("password")
-
-	user, authenticated := database.CheckUserCredentials(username, password)
-
-	if !authenticated {
-		c.HTML(http.StatusUnauthorized, "login.html", gin.H{"Error": "Invalid username or password"})
-		return
-	}
-
-	// this needs to be more robust...
-	sessionToken := username + ":" + fmt.Sprintf("%d", time.Now().Unix()) // Simple token
-	c.SetCookie("session_token", sessionToken, 3600, "/", "", false, true)
-
-	// Save the user in the context for subsequent middleware (e.g., admin check)
-	c.Set("user", user)
-
-	c.Redirect(http.StatusFound, "/")
 }
 
 func HandleDashboard(c *gin.Context) {
@@ -122,14 +94,14 @@ func HandleDashboard(c *gin.Context) {
 				// Extract date from "timelapse_1_week_20231027_150405.webm"
 				datePart := strings.TrimSuffix(strings.TrimPrefix(fileName, archivePrefix), ".webm")
 				parsedTime, err := time.Parse("20060102_150405", datePart)
-				var displayDate string
+				var isoDate string
 				if err != nil {
-					displayDate = datePart // Fallback to raw string
+					isoDate = datePart // Fallback to raw string
 				} else {
-					displayDate = parsedTime.Format("2006-01-02 15:04:05")
+					isoDate = parsedTime.Format(time.RFC3339)
 				}
 				otherVideos = append(otherVideos, gin.H{
-					"Date": displayDate,
+					"Date": isoDate,
 					"Path": "/data/" + fileName,
 				})
 			}
@@ -170,14 +142,14 @@ func HandleDashboard(c *gin.Context) {
 		"CurrentFile":         models.VideoStatusData.CurrentFile,
 	}
 	if models.VideoStatusData.LastRun != nil {
-		currentVideoStatus["LastRun"] = models.VideoStatusData.LastRun.Format("2006-01-02 15:04:05")
+		currentVideoStatus["LastRun"] = models.VideoStatusData.LastRun.Format(time.RFC3339)
 	}
 
 	user, _ := c.Get("user")
 	cachedData := cachedstats.Cache.GetData()
 
 	data := gin.H{
-		"Now":                  time.Now().Format("2006-01-02 15:04:05"),
+		"Now":                  time.Now().Format(time.RFC3339),
 		"AvailableTimelapses":  availableTimelapses,
 		"TimelapseOrder":       timelapseOrder,
 		"VideoStatus":          currentVideoStatus,
@@ -188,6 +160,7 @@ func HandleDashboard(c *gin.Context) {
 		"DefaultGalleryImages": cachedData["daily_gallery"],
 		"AvailableDates":       cachedData["available_dates"],
 		"User":                 user.(*models.User),
+		"DateFormat":           config.AppConfig.DateFormat,
 	}
 
 	c.HTML(http.StatusOK, "index.html", data)
@@ -284,9 +257,27 @@ func HandleDailyGallery(c *gin.Context) {
 
 func HandleAdminPage(c *gin.Context) {
 	user, _ := c.Get("user")
-	c.HTML(http.StatusOK, "admin.html", gin.H{
-		"User": user.(*models.User),
-	})
+	users, err := database.GetAllUsers()
+	if err != nil {
+		c.HTML(http.StatusInternalServerError, "admin.html", gin.H{
+			"User":        user.(*models.User),
+			"message":     fmt.Sprintf("Error fetching users: %v", err),
+			"messageType": "error",
+		})
+		return
+	}
+
+	successMessage := c.Query("success")
+	data := gin.H{
+		"User":  user.(*models.User),
+		"Users": users,
+	}
+	if successMessage != "" {
+		data["message"] = successMessage
+		data["messageType"] = "success"
+	}
+
+	c.HTML(http.StatusOK, "admin.html", data)
 }
 
 func HandleCreateUser(c *gin.Context) {
@@ -298,6 +289,8 @@ func HandleCreateUser(c *gin.Context) {
 	templateData := gin.H{"User": user.(*models.User)}
 
 	if username == "" || password == "" {
+		users, _ := database.GetAllUsers()
+		templateData["Users"] = users
 		templateData["message"] = "Username and password cannot be empty."
 		templateData["messageType"] = "error"
 		c.HTML(http.StatusBadRequest, "admin.html", templateData)
@@ -306,18 +299,159 @@ func HandleCreateUser(c *gin.Context) {
 
 	err := database.CreateUser(username, password, isAdmin)
 	if err != nil {
+		users, _ := database.GetAllUsers()
+		templateData["Users"] = users
 		templateData["message"] = fmt.Sprintf("Error creating user: %v", err)
 		templateData["messageType"] = "error"
 		c.HTML(http.StatusInternalServerError, "admin.html", templateData)
 		return
 	}
 
-	templateData["message"] = fmt.Sprintf("Successfully created user: %s", username)
-	templateData["messageType"] = "success"
-	c.HTML(http.StatusOK, "admin.html", templateData)
+	c.Redirect(http.StatusFound, "/admin?success=User+created+successfully")
+}
+
+func HandleDeleteUser(c *gin.Context) {
+	username := c.PostForm("username")
+	user, _ := c.Get("user")
+	loggedInUser := user.(*models.User)
+
+	// Prevent a user from deleting themselves
+	if loggedInUser.Username == username {
+		users, err := database.GetAllUsers()
+		if err != nil {
+			// Handle error fetching users, perhaps render an error page
+			c.HTML(http.StatusInternalServerError, "error.html", gin.H{"Message": "Failed to fetch user list."})
+			return
+		}
+		c.HTML(http.StatusBadRequest, "admin.html", gin.H{
+			"User":        loggedInUser,
+			"Users":       users,
+			"message":     "You cannot delete your own account.",
+			"messageType": "error",
+		})
+		return
+	}
+
+	err := database.DeleteUser(username)
+	if err != nil {
+		users, _ := database.GetAllUsers()
+		c.HTML(http.StatusInternalServerError, "admin.html", gin.H{
+			"User":        loggedInUser,
+			"Users":       users,
+			"message":     fmt.Sprintf("Error deleting user: %v", err),
+			"messageType": "error",
+		})
+		return
+	}
+
+	// Redirect to the admin page with a success message
+	// Note: Using query parameters for flash messages is simple but has limitations.
+	// A more robust solution would use session-based flash messages.
+	c.Redirect(http.StatusFound, "/admin")
+}
+
+func HandleChangePassword(c *gin.Context) {
+	username := c.PostForm("username")
+	newPassword := c.PostForm("newPassword")
+	user, _ := c.Get("user")
+	loggedInUser := user.(*models.User)
+
+	if newPassword == "" {
+		users, _ := database.GetAllUsers()
+		c.HTML(http.StatusBadRequest, "admin.html", gin.H{
+			"User":        loggedInUser,
+			"Users":       users,
+			"message":     "Password cannot be empty.",
+			"messageType": "error",
+		})
+		return
+	}
+
+	err := database.UpdateUserPassword(username, newPassword)
+	if err != nil {
+		users, _ := database.GetAllUsers()
+		c.HTML(http.StatusInternalServerError, "admin.html", gin.H{
+			"User":        loggedInUser,
+			"Users":       users,
+			"message":     fmt.Sprintf("Error changing password: %v", err),
+			"messageType": "error",
+		})
+		return
+	}
+
+	c.Redirect(http.StatusFound, "/admin")
 }
 
 // HandleUnauthorized renders a user-friendly unauthorized error page.
 func HandleUnauthorized(c *gin.Context) {
 	c.HTML(http.StatusForbidden, "error.html", gin.H{"Message": "Unauthorized Action"})
+}
+
+func HandleShareLink(c *gin.Context) {
+	filePath := c.PostForm("filePath")
+	if filePath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "filePath is required"})
+		return
+	}
+
+	// Make sure the file path is within the data directory to prevent directory traversal
+	absFilePath, err := filepath.Abs(filepath.Join(config.AppConfig.DataDir, filepath.Base(filePath)))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve file path"})
+		return
+	}
+	if !strings.HasPrefix(absFilePath, config.AppConfig.DataDir) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	var expiry time.Duration
+	if config.AppConfig.ShareLinkExpiryHours > 0 {
+		expiry = time.Hour * time.Duration(config.AppConfig.ShareLinkExpiryHours)
+	} else {
+		expiry = 0 // Unlimited
+	}
+
+	token, err := database.CreateShareLink(filePath, expiry)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create share link"})
+		return
+	}
+
+	shareLink := fmt.Sprintf("%s/public/%s", c.Request.Host, token)
+	response := gin.H{"shareLink": shareLink}
+	if expiry > 0 {
+		response["expiresAt"] = time.Now().Add(expiry).Format(time.RFC3339)
+	} else {
+		response["expiresAt"] = "Never"
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func HandlePublicLink(c *gin.Context) {
+	token := c.Param("token")
+	filePath, err := database.GetSharedFilePath(token)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Error retrieving file path")
+		return
+	}
+
+	if filePath == "" {
+		c.String(http.StatusNotFound, "Link not found or expired")
+		return
+	}
+
+	// Again, ensure the path is safe
+	absFilePath, err := filepath.Abs(filepath.Join(config.AppConfig.DataDir, filepath.Base(filePath)))
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to resolve file path")
+		return
+	}
+	if !strings.HasPrefix(absFilePath, config.AppConfig.DataDir) {
+		c.String(http.StatusForbidden, "Access denied")
+		return
+	}
+
+	c.File(absFilePath)
 }

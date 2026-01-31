@@ -67,6 +67,8 @@ DAYS_OF_24_HOUR_SNAPSHOTS="30"
 SNAPSHOT_RETENTION_DAYS="30"
 # The number of days to retain gallery images.
 GALLERY_RETENTION_DAYS="365"
+# The number of hours a shared link is valid for. Set to 0 for unlimited.
+SHARE_LINK_EXPIRY_HOURS="24"
 # The directory inside the container for storing snapshots.
 SNAPSHOTS_DIR="snapshots"
 # The directory inside the container for storing gallery images.
@@ -121,6 +123,7 @@ docker run -d --name "$CONTAINER_NAME" \
   -e GALLERY_DIR="$GALLERY_DIR" \
   -e GIN_MODE="$GIN_MODE" \
   -e HQSNAP="$HQSNAP" \
+  -e SHARE_LINK_EXPIRY_HOURS="$SHARE_LINK_EXPIRY_HOURS" \
   -v "$LOCAL_DATA_DIR":/app/data \
   "$DOCKER_IMAGE"
 

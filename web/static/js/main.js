@@ -74,6 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const videoPlayer = document.getElementById(videoPlayerId);
             const downloadButton = document.getElementById(downloadButtonId);
+            const shareButton = event.target.closest('.card-body').querySelector('.share-btn');
 
             if (videoPlayer) {
                 videoPlayer.src = newSource;
@@ -81,6 +82,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (downloadButton) {
                 downloadButton.href = newSource;
+            }
+            if (shareButton) {
+                shareButton.dataset.path = newSource;
             }
         });
     });
@@ -110,12 +114,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Logout Handler ---
-    const logoutButton = document.querySelector('a[href="/logout"]');
-    if (logoutButton) {
-        logoutButton.addEventListener('click', (event) => {
-            event.preventDefault(); // Stop the browser from navigating to the href
+    const logoutForm = document.querySelector('form[action="/logout"]');
+    if (logoutForm) {
+        logoutForm.addEventListener('submit', (event) => {
+            event.preventDefault(); // Stop the form from submitting normally
             fetch('/logout', {
-                method: 'GET',
+                method: 'POST',
             })
             .then(response => {
                 window.location.href = '/login';

@@ -113,6 +113,7 @@ If you want to build the application from source, you'll need Go 1.22 or later i
 
 The application is configured using environment variables. See the `.env` file for a complete list of available options and their descriptions.
 
+A new variable `SHARE_LINK_EXPIRY_HOURS` has been added to control the expiry of shared links. Default is `4` hours. Setting this to `0` or less will make links unlimited.
 
 ## Caveats
 This is an early release, im still tweaking and deciding how ffmpeg, encoders etc will work as taking a lot of data in ie 365 days etc may have I/O and memory issues. It's highly likely that if the container is killed during encoding, you may corrupt the entire lapse file requiring you to leverage a older file, but have not tested this, nor documented recovery. I'd recommend regular backups, and having a stable environment with a UPS etc if you want to try and rely on this.

@@ -2,13 +2,16 @@ package database
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 	_ "github.com/mattn/go-sqlite3"
@@ -88,6 +91,19 @@ func InitDB() {
 	if err != nil {
 		log.Fatalf("Failed to create trigger for jobs table: %v", err)
 	}
+
+	createSharedLinksTableSQL := `CREATE TABLE IF NOT EXISTS shared_links (
+		"id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+		"token" TEXT NOT NULL UNIQUE,
+		"file_path" TEXT NOT NULL,
+		"expires_at" DATETIME NOT NULL
+	);`
+
+	_, err = db.Exec(createSharedLinksTableSQL)
+	if err != nil {
+		log.Fatalf("Failed to create shared_links table: %v", err)
+	}
+	log.Println("shared_links table created successfully.")
 }
 
 // HashPassword generates an Argon2id hash of the password.
@@ -225,8 +241,146 @@ func GetUserByUsername(username string) (*models.User, error) {
 	return &user, nil
 }
 
+// GetAllUsers retrieves all users from the database.
+func GetAllUsers() ([]models.User, error) {
+	rows, err := db.Query("SELECT id, username, is_admin FROM users ORDER BY username")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []models.User
+	for rows.Next() {
+		var user models.User
+		var isAdminInt int
+		if err := rows.Scan(&user.ID, &user.Username, &isAdminInt); err != nil {
+			return nil, fmt.Errorf("failed to scan user row: %w", err)
+		}
+		user.IsAdmin = (isAdminInt == 1)
+		users = append(users, user)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error during user rows iteration: %w", err)
+	}
+
+	return users, nil
+}
+
+// DeleteUser deletes a user from the database.
+func DeleteUser(username string) error {
+	// You might want to prevent a user from deleting themselves.
+	// This logic would typically be in the handler, not the database layer.
+
+	result, err := db.Exec("DELETE FROM users WHERE username = ?", username)
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("user '%s' not found", username)
+	}
+
+	log.Printf("Successfully deleted user: %s", username)
+	return nil
+}
+
+// UpdateUserPassword updates a user's password in the database.
+func UpdateUserPassword(username, newPassword string) error {
+	passwordHash, err := HashPassword(newPassword)
+	if err != nil {
+		return fmt.Errorf("failed to hash new password: %w", err)
+	}
+
+	result, err := db.Exec("UPDATE users SET password_hash = ? WHERE username = ?", passwordHash, username)
+	if err != nil {
+		return fmt.Errorf("failed to update password for user '%s': %w", username, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("user '%s' not found", username)
+	}
+
+	log.Printf("Successfully updated password for user: %s", username)
+	return nil
+}
+
 // GetDB returns the database connection pool.
 func GetDB() *sql.DB {
 	return db
+}
+
+// CreateShareLink generates a new share link, stores it in the database, and returns the token.
+func CreateShareLink(filePath string, duration time.Duration) (string, error) {
+	// Generate a random token
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", fmt.Errorf("failed to generate random bytes: %w", err)
+	}
+	hash := sha256.Sum256(randomBytes)
+	token := hex.EncodeToString(hash[:])
+
+	var expiresAt time.Time
+	if duration > 0 {
+		expiresAt = time.Now().Add(duration)
+	} else {
+		// "Unlimited" links, set expiry far in the future
+		expiresAt = time.Now().AddDate(100, 0, 0)
+	}
+
+	_, err := db.Exec("INSERT INTO shared_links (token, file_path, expires_at) VALUES (?, ?, ?)", token, filePath, expiresAt)
+	if err != nil {
+		return "", fmt.Errorf("failed to create share link: %w", err)
+	}
+
+	return token, nil
+}
+
+// GetSharedFilePath retrieves the file path for a given token, checking for expiration.
+func GetSharedFilePath(token string) (string, error) {
+	var filePath string
+	var expiresAt time.Time
+	err := db.QueryRow("SELECT file_path, expires_at FROM shared_links WHERE token = ?", token).Scan(&filePath, &expiresAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil // Link not found
+		}
+		return "", fmt.Errorf("failed to get shared file path: %w", err)
+	}
+
+	if time.Now().After(expiresAt) {
+		return "", nil // Link expired
+	}
+
+	return filePath, nil
+}
+
+// DeleteExpiredShareLinks deletes all expired share links from the database.
+func DeleteExpiredShareLinks() error {
+	result, err := db.Exec("DELETE FROM shared_links WHERE expires_at < ?", time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to delete expired share links: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected > 0 {
+		log.Printf("Deleted %d expired share links", rowsAffected)
+	}
+
+	return nil
 }
 

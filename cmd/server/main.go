@@ -9,6 +9,7 @@ import (
 	"time-machine/pkg/database"
 	"time-machine/pkg/jobs"
 	"time-machine/pkg/server"
+	"time-machine/pkg/services/share"
 	"time-machine/pkg/services/snapshot"
 	"time-machine/pkg/services/video"
 	"time-machine/pkg/stats"
@@ -52,6 +53,7 @@ func main() {
 	snapshot.InitSnapshotSettings()
 	go snapshot.StartSnapshotScheduler()
 	go video.StartVideoGeneratorScheduler()
+	go share.StartShareLinkCleanupScheduler()
 	log.Printf("✅ Snapshot Scheduler started with interval: %d seconds", config.AppConfig.SnapshotIntervalSec)
 	log.Printf("✅ Video Generation Scheduler started with interval: %d seconds", config.AppConfig.VideoCronIntervalSec)
 
