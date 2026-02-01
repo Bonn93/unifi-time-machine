@@ -153,6 +153,35 @@ func TestHandleLog(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
+func TestHandleLogStream(t *testing.T) {
+	r := setupTestApp(t)
+	logContent := "line 1\nline 2\nline 3"
+	os.WriteFile(filepath.Join(config.AppConfig.DataDir, "ffmpeg_log_2023-01-01.txt"), []byte(logContent), 0644)
+	r.GET("/log/stream", HandleLogStream)
+
+	// Test successful stream
+	req, _ := http.NewRequest("GET", "/log/stream?date=2023-01-01", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, logContent, w.Body.String())
+
+	// Test missing date parameter
+	req, _ = http.NewRequest("GET", "/log/stream", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	// Test file not found
+	req, _ = http.NewRequest("GET", "/log/stream?date=2023-01-02", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
 func TestHandleDashboard(t *testing.T) {
 	r := setupTestApp(t)
 	r.GET("/", func(c *gin.Context) {

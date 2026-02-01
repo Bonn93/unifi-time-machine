@@ -46,6 +46,7 @@ func SetupRouter() *gin.Engine {
 
 		// Actions
 		authorized.GET("/log", handlers.HandleLog)
+		authorized.GET("/log/stream", handlers.HandleLogStream)
 
 		authorized.GET("/api/system-stats", handlers.HandleSystemStatsJSON)
 		authorized.GET("/api/images", handlers.HandleImageStats)
