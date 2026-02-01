@@ -36,8 +36,36 @@
                         </div>
                     </div>
 
-                    <pre class="mt-3">{{ .LogContent }}</pre>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="text-muted">Displaying log for: <strong>{{ .SelectedDate }}</strong></span>
+                        <a href="/log/stream?date={{.SelectedDate}}" class="btn btn-sm btn-outline-primary" download="ffmpeg_log_{{.SelectedDate}}.txt">
+                            <i class="fas fa-download me-2"></i>Download Full Log
+                        </a>
+                    </div>
+                    <pre class="mt-3 bg-dark text-light p-3 rounded" id="log-content"><code>Loading log...</code></pre>
 
+                    <script>
+                        document.addEventListener("DOMContentLoaded", function() {
+                            const logContent = document.getElementById('log-content');
+                            const url = `/log/stream?date={{ .SelectedDate }}`;
+
+                            logContent.innerHTML = '<code>Loading log content...</code>';
+
+                            fetch(url)
+                                .then(response => {
+                                    if (!response.ok) {
+                                        throw new Error(`HTTP error! status: ${response.status}`);
+                                    }
+                                    return response.text();
+                                })
+                                .then(text => {
+                                    logContent.innerHTML = `<code>${text}</code>`;
+                                })
+                                .catch(e => {
+                                    logContent.innerHTML = `<code><strong>Error loading log:</strong> ${e.message}</code>`;
+                                });
+                        });
+                    </script>
                 {{ else }}
                     <div class="alert alert-info">
                         {{ if .Message }}

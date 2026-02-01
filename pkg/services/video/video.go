@@ -345,7 +345,21 @@ var GenerateSingleTimelapse = func(timelapseName string) error {
 
 			err := createVideoSegment(newSnapshot, tempSegmentPath)
 			if err != nil {
-				return fmt.Errorf("error creating segment for %s: %w", newSnapshot, err)
+				log.Printf("ERROR creating segment for %s: %v. Moving to quarantine.", newSnapshot, err)
+
+				quarantineDir := filepath.Join(config.AppConfig.DataDir, "quarantine")
+				if err := os.MkdirAll(quarantineDir, 0755); err != nil {
+					log.Printf("ERROR creating quarantine directory %s: %v", quarantineDir, err)
+				}
+
+				quarantinedFile := filepath.Join(quarantineDir, filepath.Base(newSnapshot))
+				log.Printf("Moving corrupted snapshot from %s to %s", newSnapshot, quarantinedFile)
+				if err := os.Rename(newSnapshot, quarantinedFile); err != nil {
+					log.Printf("ERROR moving corrupted snapshot %s to %s: %v", newSnapshot, quarantinedFile, err)
+				}
+
+				// continue to next snapshot
+				continue
 			}
 
 			err = concatenateVideos(finalVideoPath, tempSegmentPath, tempConcatenatedVideoPath)
@@ -439,65 +453,81 @@ var filterSnapshots = func(allFiles []string, config models.TimelapseConfig, tar
 	return filtered
 }
 var regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string) error {
-	listFileName := fmt.Sprintf("image_list_%s.txt", strings.TrimSuffix(outputFileName, ".webm"))
-	imageListPath := filepath.Join(config.AppConfig.DataDir, listFileName)
+	if len(snapshotFiles) == 0 {
+		log.Println("No snapshots to generate timelapse.")
+		return nil
+	}
+
 	tempVideoPath := filepath.Join(config.AppConfig.DataDir, "temp_"+outputFileName)
 	finalVideoPath := filepath.Join(config.AppConfig.DataDir, outputFileName)
 
-	// Create image list file
-	listFile, err := os.Create(imageListPath)
-	if err != nil {
-		return fmt.Errorf("failed to create image list: %w", err)
-	}
-	defer os.Remove(imageListPath) // Clean up list file afterward
-
-	for _, file := range snapshotFiles {
-		relativePath, err := filepath.Rel(config.AppConfig.DataDir, file)
+	// Find the first valid snapshot to create the initial video.
+	var firstValidSnapshotIndex = -1
+	var validSnapshots []string
+	log.Println("Validating snapshots for full timelapse regeneration...")
+	for i, snapshot := range snapshotFiles {
+		// Use a dummy segment path to test the snapshot
+		dummySegmentPath := filepath.Join(config.AppConfig.DataDir, "validation_segment.webm")
+		err := createVideoSegment(snapshot, dummySegmentPath)
 		if err != nil {
-			log.Printf("Warning: could not create relative path for %s: %v", file, err)
+			log.Printf("ERROR: Failed to process snapshot %s: %v. Moving to quarantine.", snapshot, err)
+			quarantineDir := filepath.Join(config.AppConfig.DataDir, "quarantine")
+			if err := os.MkdirAll(quarantineDir, 0755); err != nil {
+				log.Printf("ERROR: Failed to create quarantine directory: %v", err)
+			} else {
+				destPath := filepath.Join(quarantineDir, filepath.Base(snapshot))
+				if err := os.Rename(snapshot, destPath); err != nil {
+					log.Printf("ERROR: Failed to move corrupt snapshot %s to quarantine: %v", snapshot, err)
+				}
+			}
+		} else {
+			if firstValidSnapshotIndex == -1 {
+				firstValidSnapshotIndex = i
+				// Move the first valid segment to be the start of the temp video
+				if err := os.Rename(dummySegmentPath, tempVideoPath); err != nil {
+					// cleanup dummy file if rename fails
+					os.Remove(dummySegmentPath)
+					return fmt.Errorf("failed to rename initial segment: %w", err)
+				}
+			} else {
+				// Clean up the dummy segment, not needed for subsequent files
+				os.Remove(dummySegmentPath)
+			}
+			validSnapshots = append(validSnapshots, snapshot)
+		}
+	}
+
+	if firstValidSnapshotIndex == -1 {
+		log.Printf("No valid snapshots found to generate timelapse %s.", outputFileName)
+		return nil // Nothing to do
+	}
+
+	log.Printf("Starting full regeneration with %d valid snapshots.", len(validSnapshots))
+	// Sequentially append the rest of the valid snapshots
+	for i := 1; i < len(validSnapshots); i++ {
+		snapshot := validSnapshots[i]
+		segmentPath := filepath.Join(config.AppConfig.DataDir, "temp_segment_for_full_regen.webm")
+		concatOutputPath := filepath.Join(config.AppConfig.DataDir, "temp_concat_output_for_full_regen.webm")
+
+		if err := createVideoSegment(snapshot, segmentPath); err != nil {
+			// This should theoretically not happen due to pre-validation, but handle it just in case.
+			log.Printf("ERROR during sequential append for %s: %v. Skipping.", snapshot, err)
 			continue
 		}
-		relativePath = filepath.ToSlash(relativePath)
-		listFile.WriteString(fmt.Sprintf("file '%s'\n", relativePath))
-		listFile.WriteString(fmt.Sprintf("duration %f\n", 0.0333)) // Duration for 30 FPS
-	}
-	// Add last image again to ensure full duration
-	if len(snapshotFiles) > 0 {
-		relativePath, _ := filepath.Rel(config.AppConfig.DataDir, snapshotFiles[len(snapshotFiles)-1])
-		listFile.WriteString(fmt.Sprintf("file '%s'\n", filepath.ToSlash(relativePath)))
-	}
-	listFile.Close()
 
-	// FFmpeg command
-	cmd := exec.Command("ffmpeg",
-		"-f", "concat",
-		"-safe", "0",
-		"-i", listFileName,
-		"-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
-		"-r", "30", // Set output framerate to 30 FPS
-		"-c:v", PreferredVideoCodec, // Use the detected preferred codec
-		"-threads", fmt.Sprintf("%d", ffmpegThreads),
-		"-b:v", "0", // Use CRF for quality
-		"-crf", config.AppConfig.GetCRFValue(), // Good balance of quality and size
-		"-y", "temp_"+outputFileName,
-	)
-	cmd.Dir = config.AppConfig.DataDir
+		if err := concatenateVideos(tempVideoPath, segmentPath, concatOutputPath); err != nil {
+			log.Printf("ERROR concatenating videos during full regeneration: %v. Skipping segment.", err)
+			os.Remove(segmentPath)
+			continue
+		}
+		os.Remove(segmentPath)
 
-	// Capture FFmpeg output to main log
-	logFile, err := os.OpenFile(config.GetFFmpegLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open log file: %w", err)
-	}
-	defer logFile.Close()
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-
-	log.Printf("Running FFmpeg for %s...", outputFileName)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ffmpeg execution failed: %w", err)
+		if err := os.Rename(concatOutputPath, tempVideoPath); err != nil {
+			return fmt.Errorf("failed to rename concatenated video during full regeneration: %w", err)
+		}
 	}
 
-	// Atomically replace the old video with the new one, after archiving the old one
+	// Atomically replace the old video with the new one
 	if util.FileExists(finalVideoPath) {
 		archiveFileName := fmt.Sprintf("%s_%s.webm", strings.TrimSuffix(outputFileName, ".webm"), time.Now().Format("20060102_150405"))
 		archiveVideoPath := filepath.Join(config.AppConfig.DataDir, archiveFileName)
@@ -508,9 +538,11 @@ var regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string
 	}
 
 	if err := os.Rename(tempVideoPath, finalVideoPath); err != nil {
-		return err
+		return fmt.Errorf("failed to rename temp video to final video: %w", err)
 	}
+
 	time.Sleep(100 * time.Millisecond) // Give OS time to update file metadata
+	log.Printf("Successfully completed full timelapse regeneration for %s.", outputFileName)
 	return nil
 }
 

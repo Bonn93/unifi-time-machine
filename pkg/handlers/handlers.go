@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -193,34 +194,44 @@ func HandleLog(c *gin.Context) {
 
 	// Determine which log to display
 	selectedDate := c.Query("date")
-	var logToShowPath string
-	if selectedDate != "" {
-		logToShowPath = filepath.Join(config.AppConfig.DataDir, fmt.Sprintf("ffmpeg_log_%s.txt", selectedDate))
-	} else {
-		logToShowPath = logFiles[0] // Default to the latest
+	if selectedDate == "" {
 		selectedDate = logDates[0]
-	}
-
-	content, err := os.ReadFile(logToShowPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			c.HTML(http.StatusNotFound, "log.html", gin.H{
-				"Message":      fmt.Sprintf("Log file for date %s not found.", selectedDate),
-				"AvailableDates": logDates,
-			})
-			return
-		}
-		c.String(http.StatusInternalServerError, "Error reading log file: %v", err)
-		return
 	}
 
 	user, _ := c.Get("user")
 	c.HTML(http.StatusOK, "log.html", gin.H{
 		"User":           user.(*models.User),
-		"LogContent":     string(content),
 		"AvailableDates": logDates,
 		"SelectedDate":   selectedDate,
 	})
+}
+
+func HandleLogStream(c *gin.Context) {
+	selectedDate := c.Query("date")
+	if selectedDate == "" {
+		c.String(http.StatusBadRequest, "date query parameter is required")
+		return
+	}
+
+	logPath := filepath.Join(config.AppConfig.DataDir, fmt.Sprintf("ffmpeg_log_%s.txt", selectedDate))
+	if !util.FileExists(logPath) {
+		c.String(http.StatusNotFound, "Log file not found.")
+		return
+	}
+
+	file, err := os.Open(logPath)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Error opening log file.")
+		return
+	}
+	defer file.Close()
+
+	c.Header("Content-Type", "text/plain; charset=utf-8")
+	_, err = io.Copy(c.Writer, file)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Error streaming log file.")
+		return
+	}
 }
 
 func HandleSystemStatsJSON(c *gin.Context) {
