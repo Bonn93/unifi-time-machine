@@ -1,6 +1,8 @@
 # UniFi Time-Machine
 
-UniFi Time-Machine is a Go application that creates beautiful timelapse videos from your UniFi Protect cameras. It provides a web interface to view the latest snapshots, watch generated timelapses, and monitor the system status.
+UniFi Time-Machine is a Go application that creates beautiful timelapse videos from your UniFi Protect cameras. It provides a web interface you can access directly, or behind a reverse proxy/load balancer.
+
+
 
 ## Web Console
 <img width="1912" height="1987" alt="image" src="https://github.com/user-attachments/assets/a5313036-24fd-41f3-bd46-eed4b5edbcfd" />
@@ -9,23 +11,26 @@ UniFi Time-Machine is a Go application that creates beautiful timelapse videos f
 ## Features
 
 -   **Automatic Timelapse Generation**: Periodically generates timelapse videos from your UniFi Protect camera snapshots.
+-   **Daily Gallery**: Takes hourly images of your target camera and builds a 24 hour gallery, sort and filter by date.
 -   **Web Interface**: A simple, clean web UI to view the latest snapshots, watch timelapses, and check system status.
 -   **Multi-Arch Support**: Docker images are available for both x86 (amd64) and ARM64 architectures.
--   **Configurable**: Most settings can be configured using environment variables.
+-   **Configurable**: Most settings can be configured using environment variables. 
 -   **Efficient**: Uses a background worker to process jobs and a caching mechanism to keep the UI responsive.
 
 ## Getting Started
 
-There are several ways to run UniFi Time-Machine. The easiest way is to use Docker.
+There are several ways to run UniFi Time-Machine. The easiest way is to use Docker and highly recommended.
 
 ### Versions
 Versions are linked to Git Tags on this repo such as `v0.0.1` and pushed to `Dockerhub`. Other tags of interest;
 
 - dev ( latest build on dev branches )
-- latest ( builds off main branch )
+- latest ( builds off main branch ) - will be deprecated in favour of git hash/sha256 builds.
 - tags eg: `v1.2.3` ( recommended )
 
 From the initial release, a security update was made to the container `user` which is now `appuser` with a UID/GID of `1000`, this may break your existing database on disk and require a `chown` to fix permissions. See release notes for details. 
+
+If leveraging a docker bind mount or mapping, ensure you set this. `chown -R 1000:1000 data/` on the host directory!
 
 ### Running with Docker Compose (Recommended)
 
@@ -53,7 +58,7 @@ This is the recommended way to run the application, as it simplifies the managem
 
 The `start.sh` script is a convenient way to run the application with Docker without using Docker Compose.
 
-1.  **Configure the script**: Open the `start.sh` script and edit the configuration variables at the top of the file.
+1.  **Configure the script**: Open the `start.sh` script and edit the configuration variables at the top of the file. Note that variables like APP_KEY and UFP KEY are read from your environment. Pending you shell env, this is usually set via `export UFP_API_KEY` in files like your `~/.bash_profile` or `~/.bashrc`.
 
 2.  **Make the script executable**:
 
@@ -87,7 +92,7 @@ If you want to build the Docker image yourself, you can use the `build.sh` scrip
 
 ### Building from Source
 
-If you want to build the application from source, you'll need Go 1.22 or later installed.
+If you want to build the application from source, you'll need Go 1.25 or later installed. Using docker is recommended as we need CGO with SQLite and other dependencies that's much cleaner.
 
 1.  **Install dependencies**:
 
@@ -98,7 +103,7 @@ If you want to build the application from source, you'll need Go 1.22 or later i
 2.  **Build the binary**:
 
     ```bash
-    go build -o unifi-time-machine ./cmd/server
+    CGO_ENABLED=1 GOOS=$GOOS GOARCH=$GOARCH go build -ldflags '-s -w -extldflags "-static"' -tags osusergo,netgo -o /unifi-time-machine ./cmd/server
     ```
 
 3.  **Run the application**:
@@ -107,24 +112,24 @@ If you want to build the application from source, you'll need Go 1.22 or later i
     ./unifi-time-machine
     ```
 
-    You will need to set the required environment variables before running the application.
+    You will need to set the required environment variables before running the application. Web folder must be accessible etc. 
 
 ## Configuration
 
 The application is configured using environment variables. See the `.env` file for a complete list of available options and their descriptions.
 
-A new variable `SHARE_LINK_EXPIRY_HOURS` has been added to control the expiry of shared links. Default is `4` hours. Setting this to `0` or less will make links unlimited.
-
 ## Caveats
-This is an early release, im still tweaking and deciding how ffmpeg, encoders etc will work as taking a lot of data in ie 365 days etc may have I/O and memory issues. It's highly likely that if the container is killed during encoding, you may corrupt the entire lapse file requiring you to leverage a older file, but have not tested this, nor documented recovery. I'd recommend regular backups, and having a stable environment with a UPS etc if you want to try and rely on this.
+This project is still in its early days and bugs etc are expected alongside major changes. A 1.0.0 release would represent something of more mature stability after more field testing and feedback.
 
-I have also not done any capacity planning or much storage optimisation. 
+
 
 ## Next Features
-* GPU Support, perhaps on an Intel GPU because I've never done that.
+* GPU Support
 * More than one camera in your Protect app?
 * Cloud Backups & Tiered Storage for Edge/IOT deployments
-* Public URL Sharing
+* Public URL Sharing - Done!
+* AI/Video Summary - summarise an uploaded video such as a mp4 from other systems and create a summary of detected objects, events etc
+* Payment/Cashier tracker for retail environments based on payment terminal transactions outside of shopify for the rest of the world
 
 ## Contributing
 I welcome any contributions or ideas.

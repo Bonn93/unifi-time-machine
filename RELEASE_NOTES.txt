@@ -1,3 +1,14 @@
+## 📦 version v0.0.4
+* Various dependency updates including sqlite, crypto packages, JWT and more
+* Updated UI - more structured approach fits on more screens, more scroll like format to show all videos
+* Improved stats card and performance
+* NEW - public url sharing with timed limits ( see env var for config ) 
+* NEW - admin improvements delete, update existing users in the UI
+* Fixed ffmpeg/view log with large ffmpeg logs, now uses streaming
+* Various bug fixes and stability/durability improvements
+* Update Readme prior to a docs site 
+* Renovate system now added to repo for constant dependency upgrades
+
 ## 📦 version v0.0.3
 * Implemented stats/metrics for cpu/memory and camera connection
 * Split HTML/JS/CSS into dedicated files for better visibility and tracking/best practice
