@@ -4,8 +4,16 @@ UniFi Time-Machine is a Go application that creates beautiful timelapse videos f
 
 
 
-## Web Console
-<img width="1912" height="1987" alt="image" src="https://github.com/user-attachments/assets/a5313036-24fd-41f3-bd46-eed4b5edbcfd" />
+## Web Console - Daily View
+<img width="1663" height="1813" alt="image" src="https://github.com/user-attachments/assets/f8a84e85-a78e-41dd-857c-320df74924cc" />
+
+## Web Console - Gallery
+<img width="1651" height="996" alt="image" src="https://github.com/user-attachments/assets/e730967b-b32d-449b-ae96-f258d2a907e6" />
+
+## Web Console - Admin Panel
+<img width="1238" height="1038" alt="image" src="https://github.com/user-attachments/assets/17a73cef-4e40-44f3-93d3-e71541fb9322" />
+
+## Web Console - Share Time Lapse
 
 
 ## Features
