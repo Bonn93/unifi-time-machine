@@ -33,4 +33,4 @@ jobs:
           context: .
           push: true
           tags: |
-            mbern/unifi-time-machine:${ { github.sha } }
+            mbern/unifi-time-machine:${{ github.sha }}
