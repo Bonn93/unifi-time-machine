@@ -1,5 +1,5 @@
 # --- Stage 1: Test Runner ---
-FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS tester
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS tester
 
 WORKDIR /app
 
@@ -11,7 +11,7 @@ RUN go test -v ./...
 
 # --- Stage 2: Builder (Using a Debian-based Go image) ---
 # golang:1.22-bullseye is a good choice for a stable build environment
-FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS builder
 
 # Copy source from the tester stage
 COPY --from=tester /app /app
