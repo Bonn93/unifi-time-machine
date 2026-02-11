@@ -1,6 +1,8 @@
 package video
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -64,24 +66,28 @@ func detectFFmpegCapabilities() {
 }
 
 var createVideoSegment = func(imagePath, segmentPath string) error {
+	// 1. Input Validation
+	info, err := os.Stat(imagePath)
+	if err != nil || info.Size() == 0 {
+		return fmt.Errorf("invalid snapshot file (not found or zero size): %s", imagePath)
+	}
+
 	log.Printf("Creating video segment for %s using codec %s with %d threads...", filepath.Base(imagePath), PreferredVideoCodec, ffmpegThreads)
 
-	// FFmpeg command to create a single-frame WebM segment.
-	// Parameters are aligned with regenerateFullTimelapse to ensure concat compatibility.
-	// We use a video filter to force the conversion from JPEG (Full Range) to Video (TV Range)
-	// scale=out_color_matrix=bt709:out_range=tv forces the math conversion.
-	// format=yuv420p ensures the pixel format is compatible with WebM/AV1.
-	videoFilter := "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p"
+	// 2. Process Control (Timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
+	videoFilter := "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p"
 	var cmd *exec.Cmd
 	if PreferredVideoCodec == "libsvtav1" {
-		cmd = exec.Command("ffmpeg",
+		cmd = exec.CommandContext(ctx, "ffmpeg",
 			"-hide_banner",
 			"-loglevel", "error",
 			"-loop", "1",
 			"-i", imagePath,
 			"-t", "0.0333", // 1 frame at 30fps
-			"-vf", videoFilter, // <--- CRITICAL FIX
+			"-vf", videoFilter,
 			"-c:v", PreferredVideoCodec,
 			"-preset", "8",
 			"-threads", fmt.Sprintf("%d", ffmpegThreads),
@@ -93,14 +99,13 @@ var createVideoSegment = func(imagePath, segmentPath string) error {
 			"-y", segmentPath,
 		)
 	} else {
-		// Apply the same fix to the fallback block
-		cmd = exec.Command("ffmpeg",
+		cmd = exec.CommandContext(ctx, "ffmpeg",
 			"-hide_banner",
 			"-loglevel", "error",
 			"-loop", "1",
 			"-i", imagePath,
 			"-t", "0.0333",
-			"-vf", videoFilter, // <--- CRITICAL FIX
+			"-vf", videoFilter,
 			"-c:v", PreferredVideoCodec,
 			"-threads", fmt.Sprintf("%d", ffmpegThreads),
 			"-g", "1",
@@ -112,17 +117,23 @@ var createVideoSegment = func(imagePath, segmentPath string) error {
 		)
 	}
 
-	logFile, err := os.OpenFile(config.GetFFmpegLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open FFmpeg log file: %w", err)
-	}
-	defer logFile.Close()
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
+	// 3. Safe Logging
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
+	err = cmd.Run()
+	if err != nil {
+		// Only log the output if the command actually failed
+		log.Printf("FFmpeg failed: %v. Output: %s", err, stderr.String())
+		// Also write to the daily log file for optional debugging
+		logFile, logErr := os.OpenFile(config.GetFFmpegLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if logErr == nil {
+			logFile.WriteString(fmt.Sprintf("--- FFmpeg Error: %s ---\n%s\n", time.Now(), stderr.String()))
+			logFile.Close()
+		}
 		return fmt.Errorf("ffmpeg (create segment) execution failed for %s: %w", imagePath, err)
 	}
+
 	log.Printf("Successfully created segment: %s", segmentPath)
 	return nil
 }
@@ -560,8 +571,21 @@ var CleanupSnapshots = func() {
 
 	filesToDelete := 0
 	filesKept := 0
+	corruptFiles := 0
 
 	for _, file := range allSnapshots {
+		// Check for 0-byte files
+		info, err := os.Stat(file)
+		if err == nil && info.Size() == 0 {
+			log.Printf("Found zero-byte snapshot, deleting: %s", file)
+			if err := os.Remove(file); err != nil {
+				log.Printf("Warning: failed to remove zero-byte snapshot %s: %v", file, err)
+			} else {
+				corruptFiles++
+				continue // Don't process further
+			}
+		}
+
 		// Extract timestamp from filename
 		parts := strings.Split(strings.TrimSuffix(filepath.Base(file), ".jpg"), "-")
 		if len(parts) != 6 {
@@ -585,7 +609,7 @@ var CleanupSnapshots = func() {
 		}
 	}
 
-	log.Printf("Snapshot cleanup finished. Kept %d files, removed %d files.", filesKept, filesToDelete)
+	log.Printf("Snapshot cleanup finished. Kept %d files, removed %d old files, and removed %d corrupt (zero-byte) files.", filesKept, filesToDelete, corruptFiles)
 }
 
 // This function is now called from GenerateSingleTimelapse
