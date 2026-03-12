@@ -28,7 +28,7 @@
                                     <label class="input-group-text" for="log-date-select"><i class="fas fa-calendar-alt me-2"></i>Log Date:</label>
                                     <select class="form-select" id="log-date-select" name="date" onchange="this.form.submit()">
                                         {{ range .AvailableDates }}
-                                            <option value="{{ . }}" {{ if eq . $.SelectedDate }}selected{{ end }}>{{ . }}</option>
+                                        <option value="{{.value}}" {{ if eq .value $.SelectedDate }}selected{{ end }}>{{.display}}</option>
                                         {{ end }}
                                     </select>
                                 </div>
@@ -37,7 +37,7 @@
                     </div>
 
                     <div class="d-flex justify-content-between align-items-center">
-                        <span class="text-muted">Displaying log for: <strong>{{ .SelectedDate }}</strong></span>
+                        <span class="text-muted">Displaying log for: <strong>{{ .SelectedDateDisplay }}</strong></span>
                         <a href="/log/stream?date={{.SelectedDate}}" class="btn btn-sm btn-outline-primary" download="ffmpeg_log_{{.SelectedDate}}.txt">
                             <i class="fas fa-download me-2"></i>Download Full Log
                         </a>

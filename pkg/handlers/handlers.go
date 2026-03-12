@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"github.com/gin-gonic/gin"
 	"time-machine/pkg/cachedstats"
 	"time-machine/pkg/config"
 	"time-machine/pkg/database"
@@ -17,6 +16,8 @@ import (
 	"time-machine/pkg/services/video"
 	"time-machine/pkg/stats"
 	"time-machine/pkg/util"
+
+	"github.com/gin-gonic/gin"
 )
 
 // HandleForceGenerate enqueues all timelapse jobs to be processed by the worker.
@@ -26,6 +27,11 @@ func HandleForceGenerate(c *gin.Context) {
 }
 
 // --- HANDLERS ---
+
+// HandleHealthCheck provides a simple health check endpoint
+func HandleHealthCheck(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "healthy"})
+}
 
 // HandleLoginGet renders the login page.
 func HandleLoginGet(c *gin.Context) {
@@ -56,8 +62,9 @@ func HandleDashboard(c *gin.Context) {
 
 		if util.FileExists(filePath) {
 			dailyVideos = append(dailyVideos, gin.H{
-				"Date": dateStr,
-				"Path": "/data/" + fileName,
+				"Date":        dateStr,
+				"DateDisplay": util.FormatDate(targetDate),
+				"Path":        "/data/" + fileName,
 			})
 		}
 	}
@@ -83,8 +90,9 @@ func HandleDashboard(c *gin.Context) {
 		// Check for the main file
 		if util.FileExists(filepath.Join(config.AppConfig.DataDir, baseName)) {
 			otherVideos = append(otherVideos, gin.H{
-				"Date": "Latest",
-				"Path": "/data/" + baseName,
+				"Date":        "Latest",
+				"DateDisplay": "Latest",
+				"Path":        "/data/" + baseName,
 			})
 		}
 
@@ -95,15 +103,18 @@ func HandleDashboard(c *gin.Context) {
 				// Extract date from "timelapse_1_week_20231027_150405.webm"
 				datePart := strings.TrimSuffix(strings.TrimPrefix(fileName, archivePrefix), ".webm")
 				parsedTime, err := time.Parse("20060102_150405", datePart)
-				var isoDate string
+				var isoDate, displayDate string
 				if err != nil {
 					isoDate = datePart // Fallback to raw string
+					displayDate = datePart
 				} else {
 					isoDate = parsedTime.Format(time.RFC3339)
+					displayDate = util.FormatDateTime(parsedTime)
 				}
 				otherVideos = append(otherVideos, gin.H{
-					"Date": isoDate,
-					"Path": "/data/" + fileName,
+					"Date":        isoDate,
+					"DateDisplay": displayDate,
+					"Path":        "/data/" + fileName,
 				})
 			}
 		}
@@ -143,25 +154,29 @@ func HandleDashboard(c *gin.Context) {
 		"CurrentFile":         models.VideoStatusData.CurrentFile,
 	}
 	if models.VideoStatusData.LastRun != nil {
-		currentVideoStatus["LastRun"] = models.VideoStatusData.LastRun.Format(time.RFC3339)
+		currentVideoStatus["LastRun"] = util.FormatDateTime(*models.VideoStatusData.LastRun)
 	}
 
 	user, _ := c.Get("user")
 	cachedData := cachedstats.Cache.GetData()
 
+	defaultDate := time.Now().Format("2006-01-02")
+	defaultDateDisplay := util.FormatDateForDisplay(defaultDate)
+
 	data := gin.H{
-		"Now":                  time.Now().Format(time.RFC3339),
-		"AvailableTimelapses":  availableTimelapses,
-		"TimelapseOrder":       timelapseOrder,
-		"VideoStatus":          currentVideoStatus,
-		"ImageStats":           cachedData,
-		"SystemInfo":           cachedData["system_info"],
-		"CameraStatus":         cachedData["camera_status"],
-		"DefaultGalleryDate":   cachedData["default_date"],
-		"DefaultGalleryImages": cachedData["daily_gallery"],
-		"AvailableDates":       cachedData["available_dates"],
-		"User":                 user.(*models.User),
-		"DateFormat":           config.AppConfig.DateFormat,
+		"Now":                       util.FormatDateTime(time.Now()),
+		"AvailableTimelapses":       availableTimelapses,
+		"TimelapseOrder":            timelapseOrder,
+		"VideoStatus":               currentVideoStatus,
+		"ImageStats":                cachedData,
+		"SystemInfo":                cachedData["system_info"],
+		"CameraStatus":              cachedData["camera_status"],
+		"DefaultGalleryDate":        defaultDate,
+		"DefaultGalleryDateDisplay": defaultDateDisplay,
+		"DefaultGalleryImages":      cachedData["daily_gallery"],
+		"AvailableDates":            cachedData["available_dates"],
+		"User":                      user.(*models.User),
+		"DateFormat":                config.AppConfig.DateFormat,
 	}
 
 	c.HTML(http.StatusOK, "index.html", data)
@@ -184,25 +199,34 @@ func HandleLog(c *gin.Context) {
 	// Sort files by name to get the most recent one last
 	sort.Sort(sort.Reverse(sort.StringSlice(logFiles)))
 
-	var logDates []string
-	for _, file := range logFiles {
+	var logDates []map[string]string
+	var firstDate string
+	for i, file := range logFiles {
 		// Extract YYYY-MM-DD from the filename
 		name := filepath.Base(file)
 		dateStr := strings.TrimSuffix(strings.TrimPrefix(name, "ffmpeg_log_"), ".txt")
-		logDates = append(logDates, dateStr)
+		if i == 0 {
+			firstDate = dateStr
+		}
+		logDates = append(logDates, map[string]string{
+			"value":   dateStr,
+			"display": util.FormatDateForDisplay(dateStr),
+		})
 	}
 
 	// Determine which log to display
 	selectedDate := c.Query("date")
 	if selectedDate == "" {
-		selectedDate = logDates[0]
+		selectedDate = firstDate
 	}
+	selectedDateDisplay := util.FormatDateForDisplay(selectedDate)
 
 	user, _ := c.Get("user")
 	c.HTML(http.StatusOK, "log.html", gin.H{
-		"User":           user.(*models.User),
-		"AvailableDates": logDates,
-		"SelectedDate":   selectedDate,
+		"User":                user.(*models.User),
+		"AvailableDates":      logDates,
+		"SelectedDate":        selectedDate,
+		"SelectedDateDisplay": selectedDateDisplay,
 	})
 }
 
@@ -432,7 +456,7 @@ func HandleShareLink(c *gin.Context) {
 	shareLink := fmt.Sprintf("%s/public/%s", c.Request.Host, token)
 	response := gin.H{"shareLink": shareLink}
 	if expiry > 0 {
-		response["expiresAt"] = time.Now().Add(expiry).Format(time.RFC3339)
+		response["expiresAt"] = util.FormatDateTime(time.Now().Add(expiry))
 	} else {
 		response["expiresAt"] = "Never"
 	}

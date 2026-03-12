@@ -9,7 +9,7 @@
 LOCAL_DATA_DIR="$PWD/data"
 
 # --- Docker Container Settings ---
-TAG="dev"
+TAG="v0.0.4"
 DOCKER_IMAGE="mbern/unifi-time-machine:$TAG"
 CONTAINER_NAME="unifi-time-machine"
 HTTP_PORT="8000" # The external port to access the web UI.
@@ -78,6 +78,20 @@ GALLERY_DIR="gallery"
 # This is set to match the Docker volume target path.
 # DATA_DIR="/app/data"
 
+# --- Formatting Settings ---
+# The format for displaying dates (e.g. DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD)
+DATE_FORMAT="DD/MM/YYYY"
+# The format for displaying times (e.g. 12h, 24h)
+TIME_FORMAT="12h"
+
+# --- Daylight and Interval Settings ---
+# The start hour for daytime snapshots (e.g. 6 for 6am)
+DAYLIGHT_START_HOUR="0"
+# The end hour for daytime snapshots (e.g. 18 for 6pm)
+DAYLIGHT_END_HOUR="24"
+# The frame pattern for the yearly timelapse (e.g. "daily", "hourly", "2_hourly")
+YEARLY_TIMELAPSE_PATTERN="daily"
+
 # --- Gin Web Framework Settings ---
 # Set the Gin mode to 'release' for production use.
 GIN_MODE="release"
@@ -124,6 +138,11 @@ docker run -d --name "$CONTAINER_NAME" \
   -e GIN_MODE="$GIN_MODE" \
   -e HQSNAP="$HQSNAP" \
   -e SHARE_LINK_EXPIRY_HOURS="$SHARE_LINK_EXPIRY_HOURS" \
+  -e DATE_FORMAT="$DATE_FORMAT" \
+  -e TIME_FORMAT="$TIME_FORMAT" \
+  -e DAYLIGHT_START_HOUR="$DAYLIGHT_START_HOUR" \
+  -e DAYLIGHT_END_HOUR="$DAYLIGHT_END_HOUR" \
+  -e YEARLY_TIMELAPSE_PATTERN="$YEARLY_TIMELAPSE_PATTERN" \
   -v "$LOCAL_DATA_DIR":/app/data \
   "$DOCKER_IMAGE"
 

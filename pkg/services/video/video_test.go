@@ -8,11 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"time-machine/pkg/config"
 	"time-machine/pkg/jobs"
 	"time-machine/pkg/models"
 	"time-machine/pkg/util"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func setupTest(t *testing.T) (string, func()) {
@@ -21,6 +22,8 @@ func setupTest(t *testing.T) (string, func()) {
 
 	config.AppConfig.DataDir = tempDir
 	config.AppConfig.SnapshotsDir = filepath.Join(tempDir, "snapshots")
+	config.AppConfig.DaylightStartHour = 0
+	config.AppConfig.DaylightEndHour = 24
 	os.MkdirAll(config.AppConfig.SnapshotsDir, 0755)
 
 	// Create some dummy snapshot files
@@ -249,7 +252,6 @@ func TestCreateVideoSegment_ErrorHandling(t *testing.T) {
 	})
 }
 
-
 func TestCleanOldVideos(t *testing.T) {
 	tempDir, cleanup := setupTest(t)
 	defer cleanup()
@@ -298,7 +300,6 @@ func TestCleanOldVideos(t *testing.T) {
 		{Name: "1_week"},
 	}
 	defer func() { models.TimelapseConfigsData = originalTimelapseConfigsData }()
-
 
 	for i := 0; i < 3; i++ {
 		filename := fmt.Sprintf("timelapse_1_week_%d.webm", i)
@@ -367,7 +368,6 @@ func TestCleanupGallery(t *testing.T) {
 	_, err = os.Stat(newFile)
 	assert.False(t, os.IsNotExist(err), "New gallery file should not be deleted")
 }
-
 
 func TestEnqueueTimelapseJobs(t *testing.T) {
 	originalCreateJob := jobs.CreateJob

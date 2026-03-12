@@ -93,11 +93,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const dateSelect = document.getElementById('date-select');
     if (dateSelect) {
         if (typeof availableDates !== 'undefined' && availableDates) {
-            availableDates.forEach(date => {
+            availableDates.forEach(dateObj => {
                 const option = document.createElement('option');
-                option.value = date;
-                option.textContent = date;
-                if (date === defaultDate) {
+                option.value = dateObj.value;
+                option.textContent = dateObj.display;
+                if (dateObj.value === defaultDate) {
                     option.selected = true;
                 }
                 dateSelect.appendChild(option);
@@ -105,11 +105,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (typeof initialGalleryData !== 'undefined' && initialGalleryData) {
-            renderGallery(initialGalleryData, defaultDate);
+            const selectedOption = dateSelect.options[dateSelect.selectedIndex];
+            const displayDate = selectedOption ? selectedOption.textContent : defaultDate;
+            renderGallery(initialGalleryData, displayDate);
         }
 
         dateSelect.addEventListener('change', (event) => {
-            fetchGallery(event.target.value);
+            const selectedOption = event.target.options[event.target.selectedIndex];
+            fetchGallery(event.target.value, selectedOption.textContent);
         });
     }
 
@@ -133,14 +136,14 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Helper function to render the gallery grid
-function renderGallery(galleryData, date) {
+function renderGallery(galleryData, displayDate) {
     const galleryGrid = document.getElementById('gallery-grid');
     const currentGalleryDateEl = document.getElementById('current-gallery-date');
 
     if (!galleryGrid || !currentGalleryDateEl) return;
 
     galleryGrid.innerHTML = '';
-    currentGalleryDateEl.textContent = date;
+    currentGalleryDateEl.textContent = displayDate;
     
     galleryData.forEach(item => {
         const col = document.createElement('div');
@@ -170,7 +173,7 @@ function renderGallery(galleryData, date) {
 }
 
 // Function to fetch new gallery data
-async function fetchGallery(date) {
+async function fetchGallery(date, displayDate) {
     const galleryGrid = document.getElementById('gallery-grid');
     const galleryInfo = document.getElementById('gallery-info');
 
@@ -184,8 +187,8 @@ async function fetchGallery(date) {
         }
         const data = await response.json();
         
-        galleryInfo.innerHTML = `Displaying hourly snapshots for <span class="text-primary-highlight" id="current-gallery-date">${data.date}</span>.`;
-        renderGallery(data.images, data.date);
+        galleryInfo.innerHTML = `Displaying hourly snapshots for <span class="text-primary-highlight" id="current-gallery-date">${displayDate}</span>.`;
+        renderGallery(data.images, displayDate);
     } catch (error) {
         console.error('Error fetching gallery data:', error);
         galleryGrid.innerHTML = '<div class="alert alert-danger">Failed to load gallery for this date.</div>';
