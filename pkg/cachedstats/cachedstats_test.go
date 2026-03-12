@@ -4,10 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/stretchr/testify/assert"
 	"time-machine/pkg/services/snapshot"
 	"time-machine/pkg/stats"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestUpdateAndGetData(t *testing.T) {
@@ -36,7 +37,11 @@ func TestUpdateAndGetData(t *testing.T) {
 	defer func() { stats.GetLastProcessedImageName = originalGetLastProcessedImageName }()
 
 	originalGetAvailableImageDates := stats.GetAvailableImageDates
-	stats.GetAvailableImageDates = func() []string { return []string{"2023-10-27"} }
+	stats.GetAvailableImageDates = func() []map[string]string {
+		return []map[string]string{
+			{"value": "2023-10-27", "display": "27/10/2023"},
+		}
+	}
 	defer func() { stats.GetAvailableImageDates = originalGetAvailableImageDates }()
 
 	originalGetSystemInfo := stats.GetSystemInfo
@@ -73,7 +78,7 @@ func TestUpdateAndGetData(t *testing.T) {
 	assert.Equal(t, "10.00 GB", data["image_size"].(gin.H)["image_usage_gb"])
 	assert.Equal(t, "2023-10-27 10:00:00", data["last_image_time"])
 	assert.Equal(t, "image.jpg", data["last_processed_image"])
-	assert.Equal(t, []string{"2023-10-27"}, data["available_dates"])
+	assert.Equal(t, []map[string]string{{"value": "2023-10-27", "display": "27/10/2023"}}, data["available_dates"])
 	assert.Equal(t, gin.H{"cpu": "50%"}, data["system_info"])
 	assert.Equal(t, map[string]string{"status": "active"}, data["camera_status"])
 	assert.Equal(t, []map[string]string{{"images": "5"}, {"videos": "1"}}, data["daily_gallery"])

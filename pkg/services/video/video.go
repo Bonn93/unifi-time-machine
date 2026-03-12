@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,8 +24,8 @@ import (
 // heavy AI assist here, review carefully... since FFPMEG, AV1 and WEBM is tricky
 
 var (
-	PreferredVideoCodec string
-	ffmpegThreads       int
+	PreferredVideoCodec    string
+	ffmpegThreads          int
 	onceDetectCapabilities sync.Once
 )
 
@@ -267,7 +268,6 @@ func EnqueueTimelapseJobs() {
 	}
 }
 
-
 var GenerateSingleTimelapse = func(timelapseName string) error {
 	log.Printf("--- Processing timelapse: %s ---", timelapseName)
 	detectFFmpegCapabilities()
@@ -396,19 +396,19 @@ var GenerateSingleTimelapse = func(timelapseName string) error {
 	return nil
 }
 
-var filterSnapshots = func(allFiles []string, config models.TimelapseConfig, targetTime time.Time) []string {
+var filterSnapshots = func(allFiles []string, cfg models.TimelapseConfig, targetTime time.Time) []string {
 	var filtered []string
 
 	// Determine the start and end of the filtering window
 	var windowStart, windowEnd time.Time
 
-	if strings.HasPrefix(config.Name, "24_hour_") {
+	if strings.HasPrefix(cfg.Name, "24_hour_") {
 		// For daily 24-hour snapshots, filter for the entire target day
 		windowStart = targetTime.Truncate(24 * time.Hour)
 		windowEnd = windowStart.Add(24 * time.Hour)
 	} else {
 		// For other timelapses, filter backwards from the targetTime for the specified duration
-		windowStart = targetTime.Add(-config.Duration)
+		windowStart = targetTime.Add(-cfg.Duration)
 		windowEnd = targetTime
 	}
 
@@ -431,7 +431,27 @@ var filterSnapshots = func(allFiles []string, config models.TimelapseConfig, tar
 		}
 	}
 
-	switch config.FramePattern {
+	// Apply Daylight Hours filter (ONLY if not a 24-hour timelapse)
+	if !strings.HasPrefix(cfg.Name, "24_hour_") {
+		startHour := config.AppConfig.DaylightStartHour
+		endHour := config.AppConfig.DaylightEndHour
+		if startHour > 0 || endHour < 24 {
+			var daytimeFiles []string
+			for _, file := range recentFiles {
+				parts := strings.Split(strings.TrimSuffix(filepath.Base(file), ".jpg"), "-")
+				if len(parts) >= 4 {
+					if hour, err := strconv.Atoi(parts[3]); err == nil {
+						if hour >= startHour && hour < endHour {
+							daytimeFiles = append(daytimeFiles, file)
+						}
+					}
+				}
+			}
+			recentFiles = daytimeFiles
+		}
+	}
+
+	switch cfg.FramePattern {
 	case "all":
 		filtered = recentFiles
 	case "hourly":
@@ -447,6 +467,44 @@ var filterSnapshots = func(allFiles []string, config models.TimelapseConfig, tar
 			}
 		}
 	case "daily":
+		var lastDay string
+		for _, file := range recentFiles {
+			fileName := filepath.Base(file)
+			if len(fileName) >= 10 {
+				dayKey := fileName[:10]
+				if dayKey != lastDay {
+					filtered = append(filtered, file)
+					lastDay = dayKey
+				}
+			}
+		}
+	default:
+		// Attempt to parse custom patterns like X_hourly
+		if strings.HasSuffix(cfg.FramePattern, "_hourly") {
+			intervalStr := strings.TrimSuffix(cfg.FramePattern, "_hourly")
+			if interval, err := strconv.Atoi(intervalStr); err == nil && interval > 0 {
+				var lastInterval int = -1
+				var lastDay string
+				for _, file := range recentFiles {
+					fileName := filepath.Base(file)
+					if len(fileName) >= 13 {
+						dayKey := fileName[:10]
+						hourStr := fileName[11:13]
+						if hour, err := strconv.Atoi(hourStr); err == nil {
+							intervalBucket := hour / interval
+							if dayKey != lastDay || intervalBucket != lastInterval {
+								filtered = append(filtered, file)
+								lastDay = dayKey
+								lastInterval = intervalBucket
+							}
+						}
+					}
+				}
+				break
+			}
+		}
+
+		// Fallback to daily if pattern is unrecognized or invalid
 		var lastDay string
 		for _, file := range recentFiles {
 			fileName := filepath.Base(file)
@@ -764,4 +822,4 @@ var CleanupLogFiles = func() {
 	} else {
 		log.Println("No old log files to clean up.")
 	}
-}		
+}

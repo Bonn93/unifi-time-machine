@@ -14,7 +14,7 @@ version: '3.8'
 
 services:
   unifi-time-machine:
-    image: mbern/unifi-time-machine:latest
+    image: mbern/unifi-time-machine:v0.0.4
     container_name: unifi-time-machine
     restart: unless-stopped
     ports:
@@ -53,6 +53,20 @@ services:
       VIDEO_QUALITY: 'ultra'
       # Whether to use high-quality snapshots. Options: true, false, auto.
       HQSNAP: 'auto'
+
+      # --- Formatting Settings ---
+      # The format for displaying dates (e.g. DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD)
+      DATE_FORMAT: 'DD/MM/YYYY'
+      # The format for displaying times (e.g. 12h, 24h)
+      TIME_FORMAT: '12h'
+
+      # --- Daylight and Interval Settings ---
+      # The start hour for daytime snapshots (e.g. 6 for 6am)
+      DAYLIGHT_START_HOUR: '0'
+      # The end hour for daytime snapshots (e.g. 18 for 6pm)
+      DAYLIGHT_END_HOUR: '24'
+      # The frame pattern for the yearly timelapse (e.g. "daily", "hourly", "2_hourly")
+      YEARLY_TIMELAPSE_PATTERN: 'daily'
 
       # --- Data Retention & Cleanup ---
       # The number of old archived weekly/monthly/yearly timelapse videos to keep.

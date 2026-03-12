@@ -13,31 +13,33 @@ import (
 
 // Config holds the application configuration.
 type Config struct {
-	UFPHost              string
-	UFPAPIKey            string
-	TargetCameraID       string
-	DataDir              string
-	SnapshotsDir         string
-	GalleryDir           string
-	SnapshotIntervalSec  int
-	VideoCronIntervalSec int
-	VideoArchivesToKeep  int
-	FFmpegLogPath        string
-	AppKey               string
-	AdminPassword        string
-	VideoQuality         string
-	HQSnapParams         string
-	DaysOf24HourSnapshots int
-	SnapshotRetentionDays int
-	GalleryRetentionDays  int
-	ShareLinkExpiryHours int
-	DateFormat           string
+	UFPHost                string
+	UFPAPIKey              string
+	TargetCameraID         string
+	DataDir                string
+	SnapshotsDir           string
+	GalleryDir             string
+	SnapshotIntervalSec    int
+	VideoCronIntervalSec   int
+	VideoArchivesToKeep    int
+	FFmpegLogPath          string
+	AppKey                 string
+	AdminPassword          string
+	VideoQuality           string
+	HQSnapParams           string
+	DaysOf24HourSnapshots  int
+	SnapshotRetentionDays  int
+	GalleryRetentionDays   int
+	ShareLinkExpiryHours   int
+	DateFormat             string
+	TimeFormat             string
+	DaylightStartHour      int
+	DaylightEndHour        int
+	YearlyTimelapsePattern string
 }
 
 // AppConfig is the global application configuration.
 var AppConfig Config
-
-
 
 // GetFFmpegLogPath returns the path to the ffmpeg log file for the current day.
 
@@ -50,8 +52,6 @@ func GetFFmpegLogPath() string {
 	return filepath.Join(AppConfig.DataDir, logFileName)
 
 }
-
-
 
 // GetCRFValue returns the CRF value based on the configured video quality.
 
@@ -83,140 +83,87 @@ func (c *Config) GetCRFValue() string {
 
 }
 
-
-
 // LoadConfig loads the configuration from environment variables.
 
 func LoadConfig() {
 
 	AppConfig = Config{
 
-		UFPAPIKey:            getEnv("UFP_API_KEY", ""),
+		UFPAPIKey: getEnv("UFP_API_KEY", ""),
 
-		TargetCameraID:       getEnv("TARGET_CAMERA_ID", ""),
+		TargetCameraID: getEnv("TARGET_CAMERA_ID", ""),
 
-		DataDir:              getEnv("DATA_DIR", "data"),
+		DataDir: getEnv("DATA_DIR", "data"),
 
-		SnapshotIntervalSec:  getEnvAsInt("TIMELAPSE_INTERVAL", 3600),
+		SnapshotIntervalSec: getEnvAsInt("TIMELAPSE_INTERVAL", 3600),
 
 		VideoCronIntervalSec: getEnvAsInt("VIDEO_CRON_INTERVAL", 300),
 
-		VideoArchivesToKeep:  getEnvAsInt("VIDEO_ARCHIVES_TO_KEEP", 3),
+		VideoArchivesToKeep: getEnvAsInt("VIDEO_ARCHIVES_TO_KEEP", 3),
 
-		AppKey:               getEnv("APP_KEY", ""),
+		AppKey: getEnv("APP_KEY", ""),
 
-		AdminPassword:        getEnv("ADMIN_PASSWORD", ""),
+		AdminPassword: getEnv("ADMIN_PASSWORD", ""),
 
-		VideoQuality:         getEnv("VIDEO_QUALITY", "medium"),
+		VideoQuality: getEnv("VIDEO_QUALITY", "medium"),
 
-		SnapshotsDir:         getEnv("SNAPSHOTS_DIR", "snapshots"),
+		SnapshotsDir: getEnv("SNAPSHOTS_DIR", "snapshots"),
 
-				GalleryDir:           getEnv("GALLERY_DIR", "gallery"),
+		GalleryDir: getEnv("GALLERY_DIR", "gallery"),
 
-				HQSnapParams:         getEnv("HQSNAP", "auto"),
-				
-				DaysOf24HourSnapshots: getEnvAsInt("DAYS_OF_24_HOUR_SNAPSHOTS", 30),
+		HQSnapParams: getEnv("HQSNAP", "auto"),
 
-				SnapshotRetentionDays: getEnvAsInt("SNAPSHOT_RETENTION_DAYS", 30),
-				GalleryRetentionDays:  getEnvAsInt("GALLERY_RETENTION_DAYS", 365),
-				ShareLinkExpiryHours: getEnvAsInt("SHARE_LINK_EXPIRY_HOURS", 4),
-				DateFormat:           getEnv("DATE_FORMAT", "dd/MM/yyyy"),
+		DaysOf24HourSnapshots: getEnvAsInt("DAYS_OF_24_HOUR_SNAPSHOTS", 30),
 
-			}
+		SnapshotRetentionDays:  getEnvAsInt("SNAPSHOT_RETENTION_DAYS", 30),
+		GalleryRetentionDays:   getEnvAsInt("GALLERY_RETENTION_DAYS", 365),
+		ShareLinkExpiryHours:   getEnvAsInt("SHARE_LINK_EXPIRY_HOURS", 4),
+		DateFormat:             getEnv("DATE_FORMAT", "DD/MM/YYYY"),
+		TimeFormat:             getEnv("TIME_FORMAT", "12h"),
+		DaylightStartHour:      getEnvAsInt("DAYLIGHT_START_HOUR", 0),
+		DaylightEndHour:        getEnvAsInt("DAYLIGHT_END_HOUR", 24),
+		YearlyTimelapsePattern: getEnv("YEARLY_TIMELAPSE_PATTERN", "daily"),
+	}
 
+	// Validate APP_KEY
 
+	if AppConfig.AppKey == "" {
 
-		// Validate APP_KEY
+		log.Fatal("FATAL: APP_KEY environment variable must be set.")
 
+	}
 
+	_, err := base64.StdEncoding.DecodeString(AppConfig.AppKey)
 
-		if AppConfig.AppKey == "" {
+	if err != nil {
 
+		log.Fatalf("FATAL: APP_KEY is not a valid base64 encoded string: %v", err)
 
+	}
 
-			log.Fatal("FATAL: APP_KEY environment variable must be set.")
+	// Convert DataDir to absolute path
 
+	AppConfig.DataDir, err = filepath.Abs(AppConfig.DataDir)
 
+	if err != nil {
 
-		}
+		log.Fatalf("FATAL: Could not get absolute path for DataDir: %v", err)
 
+	}
 
+	AppConfig.SnapshotsDir = filepath.Join(AppConfig.DataDir, AppConfig.SnapshotsDir)
 
-		_, err := base64.StdEncoding.DecodeString(AppConfig.AppKey)
+	AppConfig.GalleryDir = filepath.Join(AppConfig.DataDir, AppConfig.GalleryDir)
 
+	// Ensure UFP_HOST has a protocol scheme
 
+	AppConfig.UFPHost = getEnv("UFP_HOST", "")
 
-		if err != nil {
+	if AppConfig.UFPHost != "" && !strings.Contains(AppConfig.UFPHost, "://") {
 
+		AppConfig.UFPHost = "https://" + AppConfig.UFPHost
 
-
-			log.Fatalf("FATAL: APP_KEY is not a valid base64 encoded string: %v", err)
-
-
-
-		}
-
-
-
-	
-
-
-
-		// Convert DataDir to absolute path
-
-
-
-		AppConfig.DataDir, err = filepath.Abs(AppConfig.DataDir)
-
-
-
-		if err != nil {
-
-
-
-			log.Fatalf("FATAL: Could not get absolute path for DataDir: %v", err)
-
-
-
-		}
-
-
-
-	
-
-
-
-		AppConfig.SnapshotsDir = filepath.Join(AppConfig.DataDir, AppConfig.SnapshotsDir)
-
-
-
-		AppConfig.GalleryDir = filepath.Join(AppConfig.DataDir, AppConfig.GalleryDir)
-
-
-
-	
-
-
-
-		// Ensure UFP_HOST has a protocol scheme
-
-
-
-		AppConfig.UFPHost = getEnv("UFP_HOST", "")
-
-
-
-		if AppConfig.UFPHost != "" && !strings.Contains(AppConfig.UFPHost, "://") {
-
-
-
-			AppConfig.UFPHost = "https://" + AppConfig.UFPHost
-
-
-
-		}
-
-
+	}
 
 	log.Printf("UFP Host set to: %s", AppConfig.UFPHost)
 
@@ -237,6 +184,9 @@ func LoadConfig() {
 		log.Printf("Share Link Expiry: Unlimited")
 	}
 	log.Printf("Date Format: %s", AppConfig.DateFormat)
+	log.Printf("Time Format: %s", AppConfig.TimeFormat)
+	log.Printf("Daylight Filter: %02d:00 to %02d:00", AppConfig.DaylightStartHour, AppConfig.DaylightEndHour)
+	log.Printf("Yearly Timelapse Pattern: %s", AppConfig.YearlyTimelapsePattern)
 	log.Println("---------------------------------")
 }
 

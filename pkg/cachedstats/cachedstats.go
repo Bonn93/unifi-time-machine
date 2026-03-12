@@ -29,7 +29,7 @@ func getLoadingData() gin.H {
 		"image_size":           "Loading...",
 		"last_image_time":      "Loading...",
 		"last_processed_image": "Loading...",
-		"available_dates":      []string{},
+		"available_dates":      []map[string]string{},
 		"system_info":          stats.GetSystemInfo(), // This is fast and has its own "Loading..." state
 		"camera_status":        gin.H{"Name": "Loading...", "Model": "Loading...", "Status": "Loading...", "Connected": "false"},
 		"daily_gallery":        []map[string]string{},

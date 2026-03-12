@@ -8,6 +8,7 @@ import (
 	"time-machine/pkg/config"
 	"time-machine/pkg/database"
 	"time-machine/pkg/jobs"
+	"time-machine/pkg/models"
 	"time-machine/pkg/server"
 	"time-machine/pkg/services/share"
 	"time-machine/pkg/services/snapshot"
@@ -18,6 +19,13 @@ import (
 
 func main() {
 	config.LoadConfig()
+
+	// Apply configured yearly timelapse pattern
+	for i := range models.TimelapseConfigsData {
+		if models.TimelapseConfigsData[i].Name == "1_year" {
+			models.TimelapseConfigsData[i].FramePattern = config.AppConfig.YearlyTimelapsePattern
+		}
+	}
 
 	// Ensure data directories exist
 	if err := os.MkdirAll(config.AppConfig.SnapshotsDir, 0755); err != nil {
