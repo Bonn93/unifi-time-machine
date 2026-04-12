@@ -34,7 +34,7 @@ jobs:
           tags: mbern/unifi-time-machine:${{ github.ref_name }}
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           token: ${{ secrets.PAT_TOKEN }}
           tag_name: ${{ github.ref_name }}
