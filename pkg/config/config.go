@@ -13,29 +13,30 @@ import (
 
 // Config holds the application configuration.
 type Config struct {
-	UFPHost                string
-	UFPAPIKey              string
-	TargetCameraID         string
-	DataDir                string
-	SnapshotsDir           string
-	GalleryDir             string
-	SnapshotIntervalSec    int
-	VideoCronIntervalSec   int
-	VideoArchivesToKeep    int
-	FFmpegLogPath          string
-	AppKey                 string
-	AdminPassword          string
-	VideoQuality           string
-	HQSnapParams           string
-	DaysOf24HourSnapshots  int
-	SnapshotRetentionDays  int
-	GalleryRetentionDays   int
-	ShareLinkExpiryHours   int
-	DateFormat             string
-	TimeFormat             string
-	DaylightStartHour      int
-	DaylightEndHour        int
-	YearlyTimelapsePattern string
+	UFPHost               string
+	UFPAPIKey             string
+	TargetCameraID        string
+	DataDir               string
+	SnapshotsDir          string
+	GalleryDir            string
+	SnapshotIntervalSec   int
+	VideoCronIntervalSec  int
+	FFmpegLogPath         string
+	AppKey                string
+	AdminPassword         string
+	VideoQuality          string
+	HQSnapParams          string
+	DaysOf24HourSnapshots int
+	SnapshotRetentionDays int
+	GalleryRetentionDays  int
+	ShareLinkExpiryHours  int
+	DateFormat            string
+	TimeFormat            string
+	DaylightStartHour     int
+	DaylightEndHour       int
+	DaylightTargetHour    int // target hour for "daily" frame selection (closest-to-noon picker)
+	WeeklyLapsesToKeep    int // number of calendar-week timelapses to retain
+	MonthlyLapsesToKeep   int // number of calendar-month timelapses to retain
 }
 
 // AppConfig is the global application configuration.
@@ -99,8 +100,6 @@ func LoadConfig() {
 
 		VideoCronIntervalSec: getEnvAsInt("VIDEO_CRON_INTERVAL", 300),
 
-		VideoArchivesToKeep: getEnvAsInt("VIDEO_ARCHIVES_TO_KEEP", 3),
-
 		AppKey: getEnv("APP_KEY", ""),
 
 		AdminPassword: getEnv("ADMIN_PASSWORD", ""),
@@ -120,9 +119,11 @@ func LoadConfig() {
 		ShareLinkExpiryHours:   getEnvAsInt("SHARE_LINK_EXPIRY_HOURS", 4),
 		DateFormat:             getEnv("DATE_FORMAT", "DD/MM/YYYY"),
 		TimeFormat:             getEnv("TIME_FORMAT", "12h"),
-		DaylightStartHour:      getEnvAsInt("DAYLIGHT_START_HOUR", 0),
-		DaylightEndHour:        getEnvAsInt("DAYLIGHT_END_HOUR", 24),
-		YearlyTimelapsePattern: getEnv("YEARLY_TIMELAPSE_PATTERN", "daily"),
+		DaylightStartHour:   getEnvAsInt("DAYLIGHT_START_HOUR", 7),
+		DaylightEndHour:     getEnvAsInt("DAYLIGHT_END_HOUR", 19),
+		DaylightTargetHour:  getEnvAsInt("DAYLIGHT_TARGET_HOUR", 12),
+		WeeklyLapsesToKeep:  getEnvAsInt("WEEKLY_LAPSES_TO_KEEP", 4),
+		MonthlyLapsesToKeep: getEnvAsInt("MONTHLY_LAPSES_TO_KEEP", 3),
 	}
 
 	// Validate APP_KEY
@@ -172,7 +173,6 @@ func LoadConfig() {
 	log.Printf("Data Directory: %s", AppConfig.DataDir)
 	log.Printf("Snapshot Interval: %d seconds", AppConfig.SnapshotIntervalSec)
 	log.Printf("Video Cron Interval: %d seconds", AppConfig.VideoCronIntervalSec)
-	log.Printf("Video Archives to Keep: %d", AppConfig.VideoArchivesToKeep)
 	log.Printf("Video Quality: %s", AppConfig.VideoQuality)
 	log.Printf("High Quality Snapshots: %s", AppConfig.HQSnapParams)
 	log.Printf("Days of 24-Hour Timelapses: %d", AppConfig.DaysOf24HourSnapshots)
@@ -185,8 +185,9 @@ func LoadConfig() {
 	}
 	log.Printf("Date Format: %s", AppConfig.DateFormat)
 	log.Printf("Time Format: %s", AppConfig.TimeFormat)
-	log.Printf("Daylight Filter: %02d:00 to %02d:00", AppConfig.DaylightStartHour, AppConfig.DaylightEndHour)
-	log.Printf("Yearly Timelapse Pattern: %s", AppConfig.YearlyTimelapsePattern)
+	log.Printf("Daylight Filter: %02d:00 to %02d:00 (target hour: %02d:00)", AppConfig.DaylightStartHour, AppConfig.DaylightEndHour, AppConfig.DaylightTargetHour)
+	log.Printf("Weekly Lapses to Keep: %d", AppConfig.WeeklyLapsesToKeep)
+	log.Printf("Monthly Lapses to Keep: %d", AppConfig.MonthlyLapsesToKeep)
 	log.Println("---------------------------------")
 }
 

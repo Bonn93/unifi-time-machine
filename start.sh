@@ -59,8 +59,6 @@ HQSNAP="auto"
 
 
 # --- Data Retention and Cleanup Settings ---
-# The number of old archived timelapse videos to keep.
-VIDEO_ARCHIVES_TO_KEEP="3"
 # The number of days of 24-hour daily timelapses to generate and keep.
 DAYS_OF_24_HOUR_SNAPSHOTS="30"
 # The number of days to retain individual snapshots.
@@ -69,6 +67,10 @@ SNAPSHOT_RETENTION_DAYS="30"
 GALLERY_RETENTION_DAYS="365"
 # The number of hours a shared link is valid for. Set to 0 for unlimited.
 SHARE_LINK_EXPIRY_HOURS="24"
+# Number of calendar-week timelapses (Mon–Sun) to keep. Default is 4.
+WEEKLY_LAPSES_TO_KEEP="4"
+# Number of calendar-month timelapses to keep. Default is 3.
+MONTHLY_LAPSES_TO_KEEP="3"
 # The directory inside the container for storing snapshots.
 SNAPSHOTS_DIR="snapshots"
 # The directory inside the container for storing gallery images.
@@ -84,13 +86,15 @@ DATE_FORMAT="DD/MM/YYYY"
 # The format for displaying times (e.g. 12h, 24h)
 TIME_FORMAT="12h"
 
-# --- Daylight and Interval Settings ---
-# The start hour for daytime snapshots (e.g. 6 for 6am)
-DAYLIGHT_START_HOUR="0"
-# The end hour for daytime snapshots (e.g. 18 for 6pm)
-DAYLIGHT_END_HOUR="24"
-# The frame pattern for the yearly timelapse (e.g. "daily", "hourly", "2_hourly")
-YEARLY_TIMELAPSE_PATTERN="daily"
+# --- Daylight Filtering Settings ---
+# Only images taken within this hour range are included in weekly/monthly/yearly timelapses.
+# The 24-hour daily timelapse always includes all hours regardless of this setting.
+# Default: 7 (7am) to 19 (7pm). Set to 0 and 24 to disable filtering entirely.
+DAYLIGHT_START_HOUR="7"
+DAYLIGHT_END_HOUR="19"
+# Target hour for the daily frame picker used by monthly timelapses.
+# The image closest to this hour is chosen for each day. Default is 12 (noon).
+DAYLIGHT_TARGET_HOUR="12"
 
 # --- Gin Web Framework Settings ---
 # Set the Gin mode to 'release' for production use.
@@ -128,7 +132,6 @@ docker run -d --name "$CONTAINER_NAME" \
   -e TARGET_CAMERA_ID="$TARGET_CAMERA_ID" \
   -e TIMELAPSE_INTERVAL="$TIMELAPSE_INTERVAL" \
   -e VIDEO_CRON_INTERVAL="$VIDEO_CRON_INTERVAL" \
-  -e VIDEO_ARCHIVES_TO_KEEP="$VIDEO_ARCHIVES_TO_KEEP" \
   -e DAYS_OF_24_HOUR_SNAPSHOTS="$DAYS_OF_24_HOUR_SNAPSHOTS" \
   -e SNAPSHOT_RETENTION_DAYS="$SNAPSHOT_RETENTION_DAYS" \
   -e GALLERY_RETENTION_DAYS="$GALLERY_RETENTION_DAYS" \
@@ -142,7 +145,9 @@ docker run -d --name "$CONTAINER_NAME" \
   -e TIME_FORMAT="$TIME_FORMAT" \
   -e DAYLIGHT_START_HOUR="$DAYLIGHT_START_HOUR" \
   -e DAYLIGHT_END_HOUR="$DAYLIGHT_END_HOUR" \
-  -e YEARLY_TIMELAPSE_PATTERN="$YEARLY_TIMELAPSE_PATTERN" \
+  -e DAYLIGHT_TARGET_HOUR="$DAYLIGHT_TARGET_HOUR" \
+  -e WEEKLY_LAPSES_TO_KEEP="$WEEKLY_LAPSES_TO_KEEP" \
+  -e MONTHLY_LAPSES_TO_KEEP="$MONTHLY_LAPSES_TO_KEEP" \
   -v "$LOCAL_DATA_DIR":/app/data \
   "$DOCKER_IMAGE"
 

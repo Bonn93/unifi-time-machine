@@ -75,75 +75,56 @@ func HandleDashboard(c *gin.Context) {
 		availableTimelapses["Daily"] = dailyVideos
 	}
 
-	// --- Other Timelapse Info (Weekly, Monthly, Yearly) ---
+	// --- Weekly, Monthly, Yearly timelapses: discovered from filesystem ---
 	allVideoFiles, err := filepath.Glob(filepath.Join(config.AppConfig.DataDir, "timelapse_*.webm"))
 	if err != nil {
-		// Log the error but don't crash the page
 		fmt.Printf("Error globbing video files: %v\n", err)
 	}
 
-	for _, cfg := range models.TimelapseConfigsData {
-		var otherVideos []gin.H
-		baseName := fmt.Sprintf("timelapse_%s.webm", cfg.Name)
-		archivePrefix := fmt.Sprintf("timelapse_%s_", cfg.Name)
-
-		// Check for the main file
-		if util.FileExists(filepath.Join(config.AppConfig.DataDir, baseName)) {
-			otherVideos = append(otherVideos, gin.H{
-				"Date":        "Latest",
-				"DateDisplay": "Latest",
-				"Path":        "/data/" + baseName,
-			})
-		}
-
-		// Find archives
-		for _, file := range allVideoFiles {
-			fileName := filepath.Base(file)
-			if strings.HasPrefix(fileName, archivePrefix) && strings.HasSuffix(fileName, ".webm") {
-				// Extract date from "timelapse_1_week_20231027_150405.webm"
-				datePart := strings.TrimSuffix(strings.TrimPrefix(fileName, archivePrefix), ".webm")
-				parsedTime, err := time.Parse("20060102_150405", datePart)
-				var isoDate, displayDate string
-				if err != nil {
-					isoDate = datePart // Fallback to raw string
-					displayDate = datePart
-				} else {
-					isoDate = parsedTime.Format(time.RFC3339)
-					displayDate = util.FormatDateTime(parsedTime)
-				}
-				otherVideos = append(otherVideos, gin.H{
-					"Date":        isoDate,
-					"DateDisplay": displayDate,
-					"Path":        "/data/" + fileName,
-				})
+	for _, file := range allVideoFiles {
+		fileName := filepath.Base(file)
+		switch {
+		case strings.HasPrefix(fileName, "timelapse_week_"):
+			dateStr := strings.TrimPrefix(strings.TrimSuffix(fileName, ".webm"), "timelapse_week_")
+			weekStart, err := time.Parse("2006-01-02", dateStr)
+			displayDate := "Week of " + dateStr
+			if err == nil {
+				displayDate = "Week of " + util.FormatDate(weekStart)
 			}
-		}
-
-		var typeName string
-		switch cfg.Name {
-		case "1_week":
-			typeName = "Weekly"
-		case "1_month":
-			typeName = "Monthly"
-		case "1_year":
-			typeName = "Yearly"
-		default:
-			typeName = strings.Title(strings.ReplaceAll(cfg.Name, "_", " "))
-		}
-
-		if len(otherVideos) > 0 {
-			sort.Slice(otherVideos, func(i, j int) bool {
-				// Simple sort: "Latest" always comes first, then by date string descending
-				if otherVideos[i]["Date"] == "Latest" {
-					return true
-				}
-				if otherVideos[j]["Date"] == "Latest" {
-					return false
-				}
-				return otherVideos[i]["Date"].(string) > otherVideos[j]["Date"].(string)
+			availableTimelapses["Weekly"] = append(availableTimelapses["Weekly"], gin.H{
+				"Date":        dateStr,
+				"DateDisplay": displayDate,
+				"Path":        "/data/" + fileName,
 			})
-			availableTimelapses[typeName] = otherVideos
+
+		case strings.HasPrefix(fileName, "timelapse_month_"):
+			monthStr := strings.TrimPrefix(strings.TrimSuffix(fileName, ".webm"), "timelapse_month_")
+			monthStart, err := time.Parse("2006-01", monthStr)
+			displayDate := monthStr
+			if err == nil {
+				displayDate = monthStart.Format("January 2006")
+			}
+			availableTimelapses["Monthly"] = append(availableTimelapses["Monthly"], gin.H{
+				"Date":        monthStr,
+				"DateDisplay": displayDate,
+				"Path":        "/data/" + fileName,
+			})
+
+		case strings.HasPrefix(fileName, "timelapse_year_"):
+			yearStr := strings.TrimPrefix(strings.TrimSuffix(fileName, ".webm"), "timelapse_year_")
+			availableTimelapses["Yearly"] = append(availableTimelapses["Yearly"], gin.H{
+				"Date":        yearStr,
+				"DateDisplay": yearStr,
+				"Path":        "/data/" + fileName,
+			})
 		}
+	}
+
+	// Sort each category newest first
+	for _, typeName := range []string{"Weekly", "Monthly", "Yearly"} {
+		sort.Slice(availableTimelapses[typeName], func(i, j int) bool {
+			return availableTimelapses[typeName][i]["Date"].(string) > availableTimelapses[typeName][j]["Date"].(string)
+		})
 	}
 
 	currentVideoStatus := gin.H{

@@ -60,17 +60,21 @@ services:
       # The format for displaying times (e.g. 12h, 24h)
       TIME_FORMAT: '12h'
 
-      # --- Daylight and Interval Settings ---
-      # The start hour for daytime snapshots (e.g. 6 for 6am)
-      DAYLIGHT_START_HOUR: '0'
-      # The end hour for daytime snapshots (e.g. 18 for 6pm)
-      DAYLIGHT_END_HOUR: '24'
-      # The frame pattern for the yearly timelapse (e.g. "daily", "hourly", "2_hourly")
-      YEARLY_TIMELAPSE_PATTERN: 'daily'
+      # --- Daylight Filtering ---
+      # Only images taken within this hour range are used in weekly, monthly, and yearly timelapses.
+      # 24-hour daily timelapses are unaffected and always include all hours.
+      DAYLIGHT_START_HOUR: '7'
+      DAYLIGHT_END_HOUR: '19'
+      # Target hour (0–23) used to pick the best image for each day in monthly timelapses.
+      DAYLIGHT_TARGET_HOUR: '12'
+
+      # --- Timelapse Retention ---
+      # Number of calendar-week timelapses to keep (one per Monday).
+      WEEKLY_LAPSES_TO_KEEP: '4'
+      # Number of calendar-month timelapses to keep.
+      MONTHLY_LAPSES_TO_KEEP: '3'
 
       # --- Data Retention & Cleanup ---
-      # The number of old archived weekly/monthly/yearly timelapse videos to keep.
-      VIDEO_ARCHIVES_TO_KEEP: '3'
       # The number of days of 24-hour daily timelapses to generate and keep.
       DAYS_OF_24_HOUR_SNAPSHOTS: '30'
       # The number of days to retain individual snapshots.

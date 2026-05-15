@@ -61,77 +61,58 @@ func TestFilterSnapshots(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	originalSnapshotsDir := config.AppConfig.SnapshotsDir
+	originalDaylightStart := config.AppConfig.DaylightStartHour
+	originalDaylightEnd := config.AppConfig.DaylightEndHour
+	originalDaylightTarget := config.AppConfig.DaylightTargetHour
 	config.AppConfig.SnapshotsDir = filepath.Join(tempDir, "snapshots")
-	defer func() { config.AppConfig.SnapshotsDir = originalSnapshotsDir }()
+	config.AppConfig.DaylightStartHour = 0
+	config.AppConfig.DaylightEndHour = 24
+	config.AppConfig.DaylightTargetHour = 12
+	defer func() {
+		config.AppConfig.SnapshotsDir = originalSnapshotsDir
+		config.AppConfig.DaylightStartHour = originalDaylightStart
+		config.AppConfig.DaylightEndHour = originalDaylightEnd
+		config.AppConfig.DaylightTargetHour = originalDaylightTarget
+	}()
 	os.MkdirAll(config.AppConfig.SnapshotsDir, 0755)
 
-	// Use a fixed time to make the test deterministic
-	testTime := time.Date(2025, 12, 22, 12, 0, 0, 0, time.UTC) // Noon on Dec 22nd, 2025
+	// Fixed reference time: noon on Dec 22nd 2025
+	testTime := time.Date(2025, 12, 22, 12, 0, 0, 0, time.UTC)
 
-	// Create snapshots for a few days around testTime
-	// Create snapshots for Dec 21st, 22nd, and 23rd, one per hour
-	for dayOffset := -1; dayOffset <= 1; dayOffset++ { // -1 = Dec 21, 0 = Dec 22, 1 = Dec 23
+	// Create hourly snapshots for Dec 21, 22, 23
+	for dayOffset := -1; dayOffset <= 1; dayOffset++ {
 		currentDay := testTime.AddDate(0, 0, dayOffset)
 		for hour := 0; hour < 24; hour++ {
 			tm := time.Date(currentDay.Year(), currentDay.Month(), currentDay.Day(), hour, 0, 0, 0, time.UTC)
 			snapshotDir := filepath.Join(config.AppConfig.SnapshotsDir, tm.Format("2006-01"), tm.Format("02"), tm.Format("15"))
 			os.MkdirAll(snapshotDir, 0755)
-			dummyFile := filepath.Join(snapshotDir, tm.Format("2006-01-02-15-04-05")+".jpg")
-			os.WriteFile(dummyFile, []byte("dummy"), 0644)
+			os.WriteFile(filepath.Join(snapshotDir, tm.Format("2006-01-02-15-04-05")+".jpg"), []byte("dummy"), 0644)
 		}
 	}
 
 	allFiles := util.GetSnapshotFiles()
-	assert.Len(t, allFiles, 3*24, "should have 72 snapshots for 3 days") // 24 hours * 3 days
+	assert.Len(t, allFiles, 3*24, "should have 72 snapshots across 3 days")
 
-	// --- Test "all" pattern for a specific day (Dec 22nd) ---
-	// This simulates a dynamically generated 24-hour timelapse for Dec 22nd
+	// "all" pattern for a fixed 24-hour day (the 24_hour_ prefix triggers calendar-day window)
 	cfgDaily22 := models.TimelapseConfig{Name: "24_hour_2025-12-22", Duration: 24 * time.Hour, FramePattern: "all"}
-	// targetTime for filterSnapshots in this case is still testTime (Dec 22nd 12:00),
-	// but the logic inside filterSnapshots should truncate it to Dec 22nd 00:00 for windowStart.
 	filteredDaily22 := filterSnapshots(allFiles, cfgDaily22, testTime)
-	assert.Len(t, filteredDaily22, 24, "should have 24 snapshots for Dec 22nd (00:00-23:00)")
+	assert.Len(t, filteredDaily22, 24, "24_hour_ pattern: all 24 snapshots for Dec 22nd")
 
-	// --- Test "all" pattern for last 24h (old behavior, 24 hours back from testTime) ---
-	cfg24hOld := models.TimelapseConfig{Duration: 24 * time.Hour, FramePattern: "all"}
-	// testTime is Dec 22nd 12:00. Cutoff is Dec 21st 12:00.
-	// Snapshots from Dec 21st 12:00:00 to Dec 22nd 11:00:00 should be included.
-	// (24 - 12) hours from Dec 21st + 12 hours from Dec 22nd = 12 + 12 = 24.
-	// But because of how `filterSnapshots` uses `!fileTime.Before(cutoff) && fileTime.Before(windowEnd)`,
-	// if a snapshot is at `cutoff` (12:00:00), it's included. If `testTime` is 12:00:00,
-	// `testTime.Add(-24*time.Hour)` is 12:00:00 the previous day. So it's 24 hours plus the start hour.
-	// In my setup, I generate snapshots for 00:00, 01:00, ..., 23:00.
-	// So from 12:00 Dec 21 to 12:00 Dec 22:
-	// Dec 21: 12:00, 13:00, ..., 23:00 (12 snapshots)
-	// Dec 22: 00:00, 01:00, ..., 11:00 (12 snapshots)
-	// Total = 24.
-	// The original test said 25. Let's trace it carefully.
-	// The `filterSnapshots` function's `windowEnd` is `targetTime` itself for non-daily.
-	// So `!fileTime.Before(cutoff) && fileTime.Before(targetTime)`.
-	// cutoff = Dec 21 12:00:00. targetTime = Dec 22 12:00:00.
-	// So it should include [Dec 21 12:00:00, Dec 22 12:00:00).
-	// This means Dec 21 12:00, ..., 23:00 (12 snapshots) AND Dec 22 00:00, ..., 11:00 (12 snapshots). Total 24.
-	// The original test was probably off by one or had different snapshot generation.
-	filtered24hOld := filterSnapshots(allFiles, cfg24hOld, testTime)
-	assert.Len(t, filtered24hOld, 24, "should have 24 snapshots for 'all' in last 24h (12:00-12:00)")
-
-	// --- Test "hourly" pattern ---
+	// "hourly" pattern: rolling 7-day window, deduplicated to one per hour
+	// Window [Dec 15 12:00, Dec 22 12:00) → only Dec 21 00:00–Dec 22 11:00 exist = 36 files
 	cfg1w := models.TimelapseConfig{Duration: 7 * 24 * time.Hour, FramePattern: "hourly"}
-	// testTime is Dec 22nd 12:00. Cutoff is Dec 15th 12:00.
-	// Snapshots exist from Dec 21 00:00 to Dec 23 23:00.
-	// So it should pick one hourly snapshot from the window [Dec 21 00:00, Dec 22 12:00).
-	// This is 24 hours from Dec 21st + 12 hours from Dec 22nd = 36 unique hourly snapshots.
 	filtered1w := filterSnapshots(allFiles, cfg1w, testTime)
-	assert.Len(t, filtered1w, 36, "should have 36 snapshots for 'hourly' from Dec 21 00:00 to Dec 22 12:00")
+	assert.Len(t, filtered1w, 36, "hourly pattern: 24 h from Dec 21 + 12 h from Dec 22 = 36")
 
-	// --- Test "daily" pattern ---
+	// "daily" pattern: rolling 30-day window, one noon-closest image per day
+	// Window [Nov 22 12:00, Dec 22 12:00) → Dec 21 and Dec 22 are in range (Dec 23 is not)
 	cfg1m := models.TimelapseConfig{Duration: 30 * 24 * time.Hour, FramePattern: "daily"}
-	// testTime is Dec 22nd 12:00. Cutoff is Nov 22nd 12:00.
-	// Snapshots exist for Dec 21, Dec 22, Dec 23.
-	// It should pick the first snapshot of each day within the window [Nov 22 12:00, Dec 22 12:00).
-	// This means it should pick one for Dec 21, and one for Dec 22.
 	filtered1m := filterSnapshots(allFiles, cfg1m, testTime)
-	assert.Len(t, filtered1m, 2, "daily count should be 2 for the fixed time period (Dec 21, Dec 22)")
+	assert.Len(t, filtered1m, 2, "daily pattern: one image each for Dec 21 and Dec 22")
+	// Verify noon-closest image is selected (DaylightTargetHour=12)
+	for _, f := range filtered1m {
+		assert.Contains(t, filepath.Base(f), "-12-", "daily pattern should select the noon image")
+	}
 }
 
 func TestCleanupSnapshots(t *testing.T) {
@@ -290,27 +271,22 @@ func TestCleanOldVideos(t *testing.T) {
 	assert.ElementsMatch(t, expectedFiles, files, "should keep today, yesterday, and two days ago's daily videos")
 	assert.Len(t, files, 3)
 
-	// --- Test Other Timelapse Cleanup (e.g., 1_week, 1_month, etc.) ---
-	originalVideoArchivesToKeep := config.AppConfig.VideoArchivesToKeep
-	config.AppConfig.VideoArchivesToKeep = 1
-	defer func() { config.AppConfig.VideoArchivesToKeep = originalVideoArchivesToKeep }()
+	// --- Test calendar-week timelapse cleanup ---
+	originalWeeklyLapsesToKeep := config.AppConfig.WeeklyLapsesToKeep
+	config.AppConfig.WeeklyLapsesToKeep = 1
+	defer func() { config.AppConfig.WeeklyLapsesToKeep = originalWeeklyLapsesToKeep }()
 
-	originalTimelapseConfigsData := models.TimelapseConfigsData
-	models.TimelapseConfigsData = []models.TimelapseConfig{
-		{Name: "1_week"},
-	}
-	defer func() { models.TimelapseConfigsData = originalTimelapseConfigsData }()
-
-	for i := 0; i < 3; i++ {
-		filename := fmt.Sprintf("timelapse_1_week_%d.webm", i)
+	// Create 3 weekly videos; alphabetical sort == chronological, so newest is "2026-05-11"
+	for _, monday := range []string{"2026-04-27", "2026-05-04", "2026-05-11"} {
+		filename := fmt.Sprintf("timelapse_week_%s.webm", monday)
 		os.WriteFile(filepath.Join(tempDir, filename), []byte("dummy"), 0644)
 	}
 
 	CleanOldVideos()
 
-	filesWeek, _ := filepath.Glob(filepath.Join(tempDir, "timelapse_1_week_*.webm"))
-	assert.Len(t, filesWeek, 1, "should keep only 1 archive for 1_week timelapse")
-	assert.Contains(t, filesWeek, filepath.Join(tempDir, "timelapse_1_week_2.webm")) // Expecting the newest one
+	filesWeek, _ := filepath.Glob(filepath.Join(tempDir, "timelapse_week_*.webm"))
+	assert.Len(t, filesWeek, 1, "should keep only 1 weekly timelapse")
+	assert.Contains(t, filesWeek, filepath.Join(tempDir, "timelapse_week_2026-05-11.webm"), "should keep the newest week")
 }
 
 func TestCleanupLogFiles(t *testing.T) {
@@ -380,26 +356,34 @@ func TestEnqueueTimelapseJobs(t *testing.T) {
 	}
 
 	originalDaysOf24HourSnapshots := config.AppConfig.DaysOf24HourSnapshots
-	config.AppConfig.DaysOf24HourSnapshots = 2 // Will enqueue 2 daily jobs
-	defer func() { config.AppConfig.DaysOf24HourSnapshots = originalDaysOf24HourSnapshots }()
-
-	originalTimelapseConfigsData := models.TimelapseConfigsData
-	models.TimelapseConfigsData = []models.TimelapseConfig{
-		{Name: "1_week"},
-		{Name: "1_month"},
-	} // Will enqueue 2 regular jobs
-	defer func() { models.TimelapseConfigsData = originalTimelapseConfigsData }()
+	originalWeeklyLapsesToKeep := config.AppConfig.WeeklyLapsesToKeep
+	originalMonthlyLapsesToKeep := config.AppConfig.MonthlyLapsesToKeep
+	config.AppConfig.DaysOf24HourSnapshots = 2
+	config.AppConfig.WeeklyLapsesToKeep = 2
+	config.AppConfig.MonthlyLapsesToKeep = 1
+	defer func() {
+		config.AppConfig.DaysOf24HourSnapshots = originalDaysOf24HourSnapshots
+		config.AppConfig.WeeklyLapsesToKeep = originalWeeklyLapsesToKeep
+		config.AppConfig.MonthlyLapsesToKeep = originalMonthlyLapsesToKeep
+	}()
 
 	EnqueueTimelapseJobs()
 
-	// 2 daily + 2 regular + 4 cleanup jobs (snapshots, gallery, videos, logs)
-	assert.Len(t, calledJobTypes, 2+2+4)
+	// 2 daily + 2 weekly + 1 monthly + 1 yearly + 4 cleanup = 10 jobs
+	assert.Len(t, calledJobTypes, 2+2+1+1+4)
 
-	expectedJobTypes := []string{
-		"generate_timelapse", "generate_timelapse", "generate_timelapse", "generate_timelapse",
-		"cleanup_snapshots", "cleanup_videos", "cleanup_logs", "cleanup_gallery",
+	generateCount := 0
+	cleanupCount := 0
+	for _, jt := range calledJobTypes {
+		switch jt {
+		case "generate_timelapse":
+			generateCount++
+		case "cleanup_snapshots", "cleanup_videos", "cleanup_logs", "cleanup_gallery":
+			cleanupCount++
+		}
 	}
-	assert.ElementsMatch(t, expectedJobTypes, calledJobTypes)
+	assert.Equal(t, 6, generateCount, "should enqueue 2 daily + 2 weekly + 1 monthly + 1 yearly generate jobs")
+	assert.Equal(t, 4, cleanupCount, "should enqueue 4 cleanup jobs")
 }
 
 func TestGenerateSingleTimelapse_Daily(t *testing.T) {
@@ -422,9 +406,8 @@ func TestGenerateSingleTimelapse_Daily(t *testing.T) {
 	}()
 
 	regenerateFullTimelapseCalled := false
-	regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string) error {
+	regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string, archive bool) error {
 		regenerateFullTimelapseCalled = true
-		// Assert on snapshotFiles if needed
 		assert.NotEmpty(t, snapshotFiles)
 		assert.Contains(t, outputFileName, "timelapse_24_hour_")
 		return nil
@@ -449,11 +432,387 @@ func TestGenerateSingleTimelapse_Daily(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, regenerateFullTimelapseCalled, "regenerateFullTimelapse should have been called for a new daily timelapse")
 
-	// Test case for a non-existent daily timelapse date
+	// No snapshots for a date 100 days ago → silently skips, no error
 	nonExistentDay := time.Now().AddDate(0, 0, -100).Truncate(24 * time.Hour)
 	nonExistentTimelapseName := fmt.Sprintf("24_hour_%s", nonExistentDay.Format("2006-01-02"))
-	regenerateFullTimelapseCalled = false // Reset
+	regenerateFullTimelapseCalled = false
 	err = GenerateSingleTimelapse(nonExistentTimelapseName)
-	assert.NoError(t, err) // Should not error, just log no snapshots
-	assert.False(t, regenerateFullTimelapseCalled, "regenerateFullTimelapse should NOT be called for a daily timelapse with no snapshots")
+	assert.NoError(t, err)
+	assert.False(t, regenerateFullTimelapseCalled, "regenerateFullTimelapse should NOT be called when no snapshots exist")
+}
+
+// --- Helper function tests ---
+
+func TestParseFileTime(t *testing.T) {
+	t.Run("snapshot format (6 parts)", func(t *testing.T) {
+		tm, err := parseFileTime("/some/dir/2025-12-22-14-30-00.jpg")
+		assert.NoError(t, err)
+		assert.Equal(t, 2025, tm.Year())
+		assert.Equal(t, time.December, tm.Month())
+		assert.Equal(t, 22, tm.Day())
+		assert.Equal(t, 14, tm.Hour())
+	})
+
+	t.Run("gallery format (4 parts)", func(t *testing.T) {
+		tm, err := parseFileTime("/gallery/2026-05-15-12.jpg")
+		assert.NoError(t, err)
+		assert.Equal(t, 2026, tm.Year())
+		assert.Equal(t, time.May, tm.Month())
+		assert.Equal(t, 15, tm.Day())
+		assert.Equal(t, 12, tm.Hour())
+	})
+
+	t.Run("invalid format", func(t *testing.T) {
+		_, err := parseFileTime("not-a-timestamp.jpg")
+		assert.Error(t, err)
+	})
+}
+
+func TestPickClosestToHour(t *testing.T) {
+	makeFile := func(hour int) string {
+		return fmt.Sprintf("/gallery/2026-05-15-%02d.jpg", hour)
+	}
+
+	files := []string{makeFile(8), makeFile(10), makeFile(12), makeFile(15), makeFile(18)}
+
+	assert.Equal(t, makeFile(12), pickClosestToHour(files, 12), "exact match at noon")
+	assert.Equal(t, makeFile(10), pickClosestToHour(files, 11), "10 is closer to 11 than 12")
+	assert.Equal(t, makeFile(8), pickClosestToHour(files, 7), "8 is closest to 7")
+	assert.Equal(t, makeFile(18), pickClosestToHour(files, 20), "18 is closest to 20")
+
+	// Single file always returns that file
+	assert.Equal(t, makeFile(8), pickClosestToHour([]string{makeFile(8)}, 12))
+}
+
+func TestCalendarWeekMonday(t *testing.T) {
+	loc := time.UTC
+
+	monday := time.Date(2026, 5, 11, 9, 0, 0, 0, loc) // A Monday
+	assert.Equal(t, time.Date(2026, 5, 11, 0, 0, 0, 0, loc), calendarWeekMonday(monday))
+
+	wednesday := time.Date(2026, 5, 13, 15, 0, 0, 0, loc)
+	assert.Equal(t, time.Date(2026, 5, 11, 0, 0, 0, 0, loc), calendarWeekMonday(wednesday))
+
+	sunday := time.Date(2026, 5, 17, 0, 0, 0, 0, loc)
+	assert.Equal(t, time.Date(2026, 5, 11, 0, 0, 0, 0, loc), calendarWeekMonday(sunday))
+
+	saturday := time.Date(2026, 5, 16, 23, 59, 0, 0, loc)
+	assert.Equal(t, time.Date(2026, 5, 11, 0, 0, 0, 0, loc), calendarWeekMonday(saturday))
+}
+
+// --- filterSnapshots: new behaviour tests ---
+
+func setupGalleryFiles(t *testing.T, galleryDir string, start time.Time, days int) {
+	t.Helper()
+	os.MkdirAll(galleryDir, 0755)
+	for d := 0; d < days; d++ {
+		day := start.AddDate(0, 0, d)
+		for hour := 0; hour < 24; hour++ {
+			tm := time.Date(day.Year(), day.Month(), day.Day(), hour, 0, 0, 0, time.UTC)
+			name := tm.Format("2006-01-02-15") + ".jpg"
+			os.WriteFile(filepath.Join(galleryDir, name), []byte("g"), 0644)
+		}
+	}
+}
+
+func TestFilterSnapshots_CalendarWindow(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "gallery-filter-test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	originalGalleryDir := config.AppConfig.GalleryDir
+	originalDaylightStart := config.AppConfig.DaylightStartHour
+	originalDaylightEnd := config.AppConfig.DaylightEndHour
+	originalDaylightTarget := config.AppConfig.DaylightTargetHour
+	config.AppConfig.GalleryDir = filepath.Join(tempDir, "gallery")
+	config.AppConfig.DaylightStartHour = 0
+	config.AppConfig.DaylightEndHour = 24
+	config.AppConfig.DaylightTargetHour = 12
+	defer func() {
+		config.AppConfig.GalleryDir = originalGalleryDir
+		config.AppConfig.DaylightStartHour = originalDaylightStart
+		config.AppConfig.DaylightEndHour = originalDaylightEnd
+		config.AppConfig.DaylightTargetHour = originalDaylightTarget
+	}()
+
+	monday := time.Date(2026, 5, 11, 0, 0, 0, 0, time.UTC)
+	setupGalleryFiles(t, config.AppConfig.GalleryDir, monday, 7) // Mon–Sun
+	allFiles := util.GetGalleryFiles()
+	assert.Len(t, allFiles, 7*24, "7 days × 24 hours = 168 gallery files")
+
+	// Weekly calendar window: hourly pattern, no daylight filter
+	cfg := models.TimelapseConfig{
+		Name:         "week_2026-05-11",
+		FramePattern: "hourly",
+		WindowStart:  monday,
+		WindowEnd:    monday.AddDate(0, 0, 7),
+	}
+	filtered := filterSnapshots(allFiles, cfg, monday)
+	assert.Len(t, filtered, 7*24, "hourly pattern: one per hour = 168 frames for the week")
+	assert.True(t, sort.StringsAreSorted(filtered), "results must be chronological")
+}
+
+func TestFilterSnapshots_DaylightFilter(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "daylight-filter-test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	originalGalleryDir := config.AppConfig.GalleryDir
+	originalDaylightStart := config.AppConfig.DaylightStartHour
+	originalDaylightEnd := config.AppConfig.DaylightEndHour
+	originalDaylightTarget := config.AppConfig.DaylightTargetHour
+	config.AppConfig.GalleryDir = filepath.Join(tempDir, "gallery")
+	config.AppConfig.DaylightStartHour = 7
+	config.AppConfig.DaylightEndHour = 19
+	config.AppConfig.DaylightTargetHour = 12
+	defer func() {
+		config.AppConfig.GalleryDir = originalGalleryDir
+		config.AppConfig.DaylightStartHour = originalDaylightStart
+		config.AppConfig.DaylightEndHour = originalDaylightEnd
+		config.AppConfig.DaylightTargetHour = originalDaylightTarget
+	}()
+
+	monday := time.Date(2026, 5, 11, 0, 0, 0, 0, time.UTC)
+	setupGalleryFiles(t, config.AppConfig.GalleryDir, monday, 3)
+	allFiles := util.GetGalleryFiles()
+
+	// Hourly with daylight 7–19: 12 daylight hours per day, 3 days
+	cfg := models.TimelapseConfig{
+		Name:         "week_2026-05-11",
+		FramePattern: "hourly",
+		WindowStart:  monday,
+		WindowEnd:    monday.AddDate(0, 0, 3),
+	}
+	filtered := filterSnapshots(allFiles, cfg, monday)
+	assert.Len(t, filtered, 3*12, "12 daylight hours × 3 days = 36 frames")
+	for _, f := range filtered {
+		tm, err := parseFileTime(f)
+		assert.NoError(t, err)
+		assert.GreaterOrEqual(t, tm.Hour(), 7, "no images before 7am")
+		assert.Less(t, tm.Hour(), 19, "no images at 7pm or later")
+	}
+}
+
+func TestFilterSnapshots_3Hourly(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "3hourly-filter-test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	originalGalleryDir := config.AppConfig.GalleryDir
+	originalDaylightStart := config.AppConfig.DaylightStartHour
+	originalDaylightEnd := config.AppConfig.DaylightEndHour
+	config.AppConfig.GalleryDir = filepath.Join(tempDir, "gallery")
+	config.AppConfig.DaylightStartHour = 7
+	config.AppConfig.DaylightEndHour = 19
+	defer func() {
+		config.AppConfig.GalleryDir = originalGalleryDir
+		config.AppConfig.DaylightStartHour = originalDaylightStart
+		config.AppConfig.DaylightEndHour = originalDaylightEnd
+	}()
+
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	setupGalleryFiles(t, config.AppConfig.GalleryDir, start, 2)
+	allFiles := util.GetGalleryFiles()
+
+	cfg := models.TimelapseConfig{
+		Name:         "year_2026",
+		FramePattern: "3_hourly",
+		WindowStart:  start,
+		WindowEnd:    start.AddDate(0, 0, 2),
+	}
+	filtered := filterSnapshots(allFiles, cfg, start)
+	// Daylight 7–19 = hours 7..18; 3_hourly buckets: 7÷3=2, 9÷3=3, 12÷3=4, 15÷3=5, 18÷3=6 → 5 per day
+	assert.Len(t, filtered, 2*5, "3_hourly + daylight 7–19: 5 images per day × 2 days = 10")
+}
+
+func TestFilterSnapshots_MonthlyNoonPicking(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "noon-picking-test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	originalGalleryDir := config.AppConfig.GalleryDir
+	originalDaylightStart := config.AppConfig.DaylightStartHour
+	originalDaylightEnd := config.AppConfig.DaylightEndHour
+	originalDaylightTarget := config.AppConfig.DaylightTargetHour
+	config.AppConfig.GalleryDir = filepath.Join(tempDir, "gallery")
+	config.AppConfig.DaylightStartHour = 7
+	config.AppConfig.DaylightEndHour = 19
+	config.AppConfig.DaylightTargetHour = 12
+	defer func() {
+		config.AppConfig.GalleryDir = originalGalleryDir
+		config.AppConfig.DaylightStartHour = originalDaylightStart
+		config.AppConfig.DaylightEndHour = originalDaylightEnd
+		config.AppConfig.DaylightTargetHour = originalDaylightTarget
+	}()
+
+	// Create 3 days of gallery images
+	monthStart := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	setupGalleryFiles(t, config.AppConfig.GalleryDir, monthStart, 3)
+	allFiles := util.GetGalleryFiles()
+
+	cfg := models.TimelapseConfig{
+		Name:         "month_2026-05",
+		FramePattern: "daily",
+		WindowStart:  monthStart,
+		WindowEnd:    monthStart.AddDate(0, 0, 3),
+	}
+	filtered := filterSnapshots(allFiles, cfg, monthStart)
+	assert.Len(t, filtered, 3, "one image per day for 3 days")
+	for _, f := range filtered {
+		tm, err := parseFileTime(f)
+		assert.NoError(t, err)
+		assert.Equal(t, 12, tm.Hour(), "daily pattern must select the noon (hour 12) image")
+	}
+}
+
+// --- GenerateSingleTimelapse: calendar prefix tests ---
+
+func setupCalendarTest(t *testing.T) (string, func()) {
+	t.Helper()
+	tempDir, err := os.MkdirTemp("", "calendar-timelapse-test")
+	assert.NoError(t, err)
+
+	config.AppConfig.DataDir = tempDir
+	config.AppConfig.SnapshotsDir = filepath.Join(tempDir, "snapshots")
+	config.AppConfig.GalleryDir = filepath.Join(tempDir, "gallery")
+	config.AppConfig.DaylightStartHour = 7
+	config.AppConfig.DaylightEndHour = 19
+	config.AppConfig.DaylightTargetHour = 12
+	os.MkdirAll(config.AppConfig.SnapshotsDir, 0755)
+	os.MkdirAll(config.AppConfig.GalleryDir, 0755)
+
+	return tempDir, func() { os.RemoveAll(tempDir) }
+}
+
+func mockVideoFunctions(t *testing.T) (called *bool, restore func()) {
+	t.Helper()
+	origRegen := regenerateFullTimelapse
+	origWrite := writeLastAppendedSnapshot
+	origRead := readLastAppendedSnapshot
+	origSeg := createVideoSegment
+	origConcat := concatenateVideos
+
+	wasCalled := false
+	regenerateFullTimelapse = func(_ []string, _ string, _ bool) error {
+		wasCalled = true
+		return nil
+	}
+	writeLastAppendedSnapshot = func(_, _ string) error { return nil }
+	readLastAppendedSnapshot = func(_ string) (string, error) { return "", nil }
+	createVideoSegment = func(_, _ string) error { return nil }
+	concatenateVideos = func(_, _, _ string) error { return nil }
+
+	return &wasCalled, func() {
+		regenerateFullTimelapse = origRegen
+		writeLastAppendedSnapshot = origWrite
+		readLastAppendedSnapshot = origRead
+		createVideoSegment = origSeg
+		concatenateVideos = origConcat
+	}
+}
+
+func TestGenerateSingleTimelapse_Week(t *testing.T) {
+	_, cleanup := setupCalendarTest(t)
+	defer cleanup()
+	called, restore := mockVideoFunctions(t)
+	defer restore()
+
+	// Populate the gallery for the target week
+	monday := calendarWeekMonday(time.Now())
+	setupGalleryFiles(t, config.AppConfig.GalleryDir, monday, 7)
+
+	name := fmt.Sprintf("week_%s", monday.Format("2006-01-02"))
+	err := GenerateSingleTimelapse(name)
+	assert.NoError(t, err)
+	assert.True(t, *called, "regenerateFullTimelapse should be called when gallery files exist for the week")
+}
+
+func TestGenerateSingleTimelapse_Month(t *testing.T) {
+	_, cleanup := setupCalendarTest(t)
+	defer cleanup()
+	called, restore := mockVideoFunctions(t)
+	defer restore()
+
+	monthStart := time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.UTC)
+	setupGalleryFiles(t, config.AppConfig.GalleryDir, monthStart, 5)
+
+	name := fmt.Sprintf("month_%s", monthStart.Format("2006-01"))
+	err := GenerateSingleTimelapse(name)
+	assert.NoError(t, err)
+	assert.True(t, *called, "regenerateFullTimelapse should be called for a month with gallery files")
+}
+
+func TestGenerateSingleTimelapse_Year(t *testing.T) {
+	_, cleanup := setupCalendarTest(t)
+	defer cleanup()
+	called, restore := mockVideoFunctions(t)
+	defer restore()
+
+	yearStart := time.Date(time.Now().Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
+	setupGalleryFiles(t, config.AppConfig.GalleryDir, yearStart, 10)
+
+	name := fmt.Sprintf("year_%d", time.Now().Year())
+	err := GenerateSingleTimelapse(name)
+	assert.NoError(t, err)
+	assert.True(t, *called, "regenerateFullTimelapse should be called for a year with gallery files")
+}
+
+func TestGenerateSingleTimelapse_InvalidName(t *testing.T) {
+	_, cleanup := setupCalendarTest(t)
+	defer cleanup()
+
+	err := GenerateSingleTimelapse("unknown_timelapse_type")
+	assert.Error(t, err, "unrecognized timelapse name should return an error")
+}
+
+func TestGenerateSingleTimelapse_NoGalleryFiles(t *testing.T) {
+	_, cleanup := setupCalendarTest(t)
+	defer cleanup()
+	called, restore := mockVideoFunctions(t)
+	defer restore()
+
+	// Empty gallery — no files for the requested week
+	monday := calendarWeekMonday(time.Now().AddDate(0, 0, -365))
+	name := fmt.Sprintf("week_%s", monday.Format("2006-01-02"))
+	err := GenerateSingleTimelapse(name)
+	assert.NoError(t, err)
+	assert.False(t, *called, "regenerateFullTimelapse should NOT be called when gallery is empty for the window")
+}
+
+// --- CleanOldVideos: monthly and yearly ---
+
+func TestCleanOldVideos_Monthly(t *testing.T) {
+	tempDir, cleanup := setupTest(t)
+	defer cleanup()
+
+	originalMonthlyLapsesToKeep := config.AppConfig.MonthlyLapsesToKeep
+	config.AppConfig.MonthlyLapsesToKeep = 2
+	defer func() { config.AppConfig.MonthlyLapsesToKeep = originalMonthlyLapsesToKeep }()
+
+	for _, month := range []string{"2026-02", "2026-03", "2026-04", "2026-05"} {
+		os.WriteFile(filepath.Join(tempDir, "timelapse_month_"+month+".webm"), []byte("x"), 0644)
+	}
+
+	CleanOldVideos()
+
+	remaining, _ := filepath.Glob(filepath.Join(tempDir, "timelapse_month_*.webm"))
+	assert.Len(t, remaining, 2, "should keep only the 2 newest monthly timelapses")
+	assert.Contains(t, remaining, filepath.Join(tempDir, "timelapse_month_2026-05.webm"))
+	assert.Contains(t, remaining, filepath.Join(tempDir, "timelapse_month_2026-04.webm"))
+}
+
+func TestCleanOldVideos_Yearly(t *testing.T) {
+	tempDir, cleanup := setupTest(t)
+	defer cleanup()
+
+	for _, year := range []string{"2023", "2024", "2025", "2026"} {
+		os.WriteFile(filepath.Join(tempDir, "timelapse_year_"+year+".webm"), []byte("x"), 0644)
+	}
+
+	CleanOldVideos()
+
+	remaining, _ := filepath.Glob(filepath.Join(tempDir, "timelapse_year_*.webm"))
+	assert.Len(t, remaining, 2, "should keep only 2 yearly timelapses (current + previous)")
+	assert.Contains(t, remaining, filepath.Join(tempDir, "timelapse_year_2026.webm"))
+	assert.Contains(t, remaining, filepath.Join(tempDir, "timelapse_year_2025.webm"))
 }

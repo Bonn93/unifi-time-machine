@@ -19,10 +19,12 @@ UniFi Time-Machine is a Go application that creates beautiful timelapse videos f
 ## Features
 
 -   **Automatic Timelapse Generation**: Periodically generates timelapse videos from your UniFi Protect camera snapshots.
--   **Daily Gallery**: Takes hourly images of your target camera and builds a 24 hour gallery, sort and filter by date.
+-   **Calendar-Based Timelapses**: Four timelapse types — daily (24 h), weekly (Mon–Sun), monthly, and yearly — each with configurable retention counts. No rolling-window drift.
+-   **Daytime-First Image Selection**: Weekly and monthly lapses use gallery images filtered to your configured daylight hours, and daily pattern picks the image closest to noon — no more night images.
+-   **Daily Gallery**: Takes hourly images of your target camera and builds a 24-hour gallery; sort and filter by date.
 -   **Web Interface**: A simple, clean web UI to view the latest snapshots, watch timelapses, and check system status.
 -   **Multi-Arch Support**: Docker images are available for both x86 (amd64) and ARM64 architectures.
--   **Configurable**: Most settings can be configured using environment variables. 
+-   **Configurable**: Most settings can be configured using environment variables.
 -   **Efficient**: Uses a background worker to process jobs and a caching mechanism to keep the UI responsive.
 
 ## Getting Started
@@ -124,7 +126,67 @@ If you want to build the application from source, you'll need Go 1.25 or later i
 
 ## Configuration
 
-The application is configured using environment variables. See the `.env` file for a complete list of available options and their descriptions.
+The application is configured using environment variables. The `.env` file contains the full list with comments. Key variables are described below.
+
+### Required
+
+| Variable | Description |
+|---|---|
+| `UFP_HOST` | IP or hostname of your UniFi Protect controller |
+| `UFP_API_KEY` | API key from UniFi OS Console → Integrations |
+| `TARGET_CAMERA_ID` | Camera ID found in the Protect URL when viewing the camera |
+| `APP_KEY` | Base64-encoded secret key (`head -c 32 /dev/urandom \| base64`) |
+| `ADMIN_PASSWORD` | Password for the initial `admin` account (required on first run) |
+
+### Snapshot & Video
+
+| Variable | Default | Description |
+|---|---|---|
+| `TIMELAPSE_INTERVAL` | `3600` | Seconds between snapshots (e.g. `3600` = hourly) |
+| `VIDEO_CRON_INTERVAL` | `300` | Seconds between timelapse generation passes |
+| `VIDEO_QUALITY` | `medium` | Encoding quality: `low`, `medium`, `high`, `ultra` |
+| `DAYS_OF_24_HOUR_SNAPSHOTS` | `30` | How many daily 24-hour timelapses to keep |
+| `SNAPSHOT_RETENTION_DAYS` | `30` | How long to keep raw snapshot files |
+| `GALLERY_RETENTION_DAYS` | `365` | How long to keep hourly gallery images |
+| `SHARE_LINK_EXPIRY_HOURS` | `4` | Shared link lifetime in hours (`0` = unlimited) |
+
+### Timelapse Types & Retention
+
+UniFi Time-Machine generates four categories of timelapse, all sourced from the 365-day hourly gallery so they are not limited by raw snapshot retention.
+
+| Type | Source | Frame selection | Named as |
+|---|---|---|---|
+| **Daily** | Raw snapshots | Every captured image for that calendar day | `timelapse_24_hour_YYYY-MM-DD.webm` |
+| **Weekly** | Gallery (hourly) | One image per daylight hour, Mon–Sun | `timelapse_week_YYYY-MM-DD.webm` (Monday date) |
+| **Monthly** | Gallery (hourly) | One image per day, closest to noon | `timelapse_month_YYYY-MM.webm` |
+| **Yearly** | Gallery (hourly) | ~5 images per day (every 3 h) | `timelapse_year_YYYY.webm` |
+
+| Variable | Default | Description |
+|---|---|---|
+| `WEEKLY_LAPSES_TO_KEEP` | `4` | Number of calendar-week timelapses to retain |
+| `MONTHLY_LAPSES_TO_KEEP` | `3` | Number of calendar-month timelapses to retain |
+
+### Daylight Filtering
+
+These settings apply to weekly, monthly, and yearly timelapses. The 24-hour daily timelapse always includes all hours.
+
+| Variable | Default | Description |
+|---|---|---|
+| `DAYLIGHT_START_HOUR` | `7` | Earliest hour (0–23) included in non-daily lapses |
+| `DAYLIGHT_END_HOUR` | `19` | Latest hour (exclusive) included in non-daily lapses |
+| `DAYLIGHT_TARGET_HOUR` | `12` | Preferred hour for daily-pattern selection (monthly lapse picks the image closest to this hour each day) |
+
+### Display
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATE_FORMAT` | `DD/MM/YYYY` | Date display format: `DD/MM/YYYY`, `MM/DD/YYYY`, `YYYY-MM-DD` |
+| `TIME_FORMAT` | `12h` | Time display format: `12h` or `24h` |
+| `TZ` | — | Container timezone (e.g. `Australia/Sydney`, `America/New_York`) |
+
+### Migrating from older versions
+
+Versions prior to this release used rolling-window timelapses named `timelapse_1_week.webm`, `timelapse_1_month.webm`, and `timelapse_1_year.webm`. These files are no longer generated or cleaned up automatically. You can safely delete them from your data directory — the new calendar-named files will appear automatically on the next generation cycle.
 
 ## Caveats
 This project is still in its early days and bugs etc are expected alongside major changes. A 1.0.0 release would represent something of more mature stability after more field testing and feedback.
