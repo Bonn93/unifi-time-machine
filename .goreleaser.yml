@@ -1,6 +1,8 @@
 version: 2
 
 # We don't distribute Go binaries — skip the build step entirely.
+# Docker images are built separately in the workflow using docker/build-push-action,
+# which handles the full repo build context correctly.
 builds:
   - skip: true
 
@@ -24,42 +26,7 @@ changelog:
     - title: Other Changes
       order: 999
 
-# Build per-arch images that GoReleaser then combines into a manifest.
-dockers:
-  - image_templates:
-      - "mbern/unifi-time-machine:{{ .Tag }}-amd64"
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.created={{ .Date }}"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-      - "--label=org.opencontainers.image.source=https://github.com/Bonn93/unifi-time-machine"
-
-  - image_templates:
-      - "mbern/unifi-time-machine:{{ .Tag }}-arm64"
-    use: buildx
-    goarch: arm64
-    build_flag_templates:
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.created={{ .Date }}"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-      - "--label=org.opencontainers.image.source=https://github.com/Bonn93/unifi-time-machine"
-
-# Combine the per-arch images into versioned + latest manifests.
-docker_manifests:
-  - name_template: "mbern/unifi-time-machine:{{ .Tag }}"
-    image_templates:
-      - "mbern/unifi-time-machine:{{ .Tag }}-amd64"
-      - "mbern/unifi-time-machine:{{ .Tag }}-arm64"
-
-  - name_template: "mbern/unifi-time-machine:latest"
-    image_templates:
-      - "mbern/unifi-time-machine:{{ .Tag }}-amd64"
-      - "mbern/unifi-time-machine:{{ .Tag }}-arm64"
-
-# GitHub Release config — attaches RELEASE_NOTES.txt as a downloadable asset.
+# GitHub Release — attaches RELEASE_NOTES.txt as a downloadable asset.
 release:
   extra_files:
     - glob: RELEASE_NOTES.txt
