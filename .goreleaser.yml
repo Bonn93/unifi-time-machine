@@ -59,10 +59,8 @@ docker_manifests:
       - "mbern/unifi-time-machine:{{ .Tag }}-amd64"
       - "mbern/unifi-time-machine:{{ .Tag }}-arm64"
 
-# GitHub Release config — prepends RELEASE_NOTES.txt above the auto-changelog.
+# GitHub Release config — attaches RELEASE_NOTES.txt as a downloadable asset.
 release:
-  header_templates:
-    - "{{ .Body }}"
   extra_files:
     - glob: RELEASE_NOTES.txt
   footer: |
