@@ -1,0 +1,78 @@
+version: 2
+
+# We don't distribute Go binaries — skip the build step entirely.
+builds:
+  - skip: true
+
+# Changelog is generated from git history between tags.
+# Adopt Conventional Commits (feat:, fix:, chore:) for automatic grouping.
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^chore\(deps\):'     # Renovate noise
+      - '^Merge pull request'
+      - '^Merge branch'
+  groups:
+    - title: New Features
+      regexp: '^feat'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^fix'
+      order: 1
+    - title: Other Changes
+      order: 999
+
+# Build per-arch images that GoReleaser then combines into a manifest.
+dockers:
+  - image_templates:
+      - "mbern/unifi-time-machine:{{ .Tag }}-amd64"
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.source=https://github.com/Bonn93/unifi-time-machine"
+
+  - image_templates:
+      - "mbern/unifi-time-machine:{{ .Tag }}-arm64"
+    use: buildx
+    goarch: arm64
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.source=https://github.com/Bonn93/unifi-time-machine"
+
+# Combine the per-arch images into versioned + latest manifests.
+docker_manifests:
+  - name_template: "mbern/unifi-time-machine:{{ .Tag }}"
+    image_templates:
+      - "mbern/unifi-time-machine:{{ .Tag }}-amd64"
+      - "mbern/unifi-time-machine:{{ .Tag }}-arm64"
+
+  - name_template: "mbern/unifi-time-machine:latest"
+    image_templates:
+      - "mbern/unifi-time-machine:{{ .Tag }}-amd64"
+      - "mbern/unifi-time-machine:{{ .Tag }}-arm64"
+
+# GitHub Release config — prepends RELEASE_NOTES.txt above the auto-changelog.
+release:
+  header_templates:
+    - "{{ .Body }}"
+  extra_files:
+    - glob: RELEASE_NOTES.txt
+  footer: |
+    ---
+    ## Docker
+
+    ```bash
+    # Docker Compose (recommended)
+    image: mbern/unifi-time-machine:{{ .Tag }}
+
+    # Docker run
+    docker pull mbern/unifi-time-machine:{{ .Tag }}
+    ```

@@ -1,3 +1,49 @@
+## 📦 version v0.0.5
+
+### 🚨 Migration Notice — Timelapse Naming Change
+
+Timelapses are now calendar-fixed (Mon–Sun weeks, calendar months, full years) instead of rolling windows. This fixes night images appearing in lapses and weekly lapses accumulating more than a week of data.
+
+**Your existing timelapse files are NOT deleted automatically.** The UI will show "no timelapse available yet" for weekly/monthly/yearly until you rename them or the next generation cycle completes.
+
+To restore your existing lapses immediately, run the following on your host in the `data/` directory (adjust the dates to today's current week/month/year):
+
+```bash
+mv timelapse_1_year.webm  timelapse_year_2026.webm
+mv timelapse_1_month.webm timelapse_month_2026-05.webm
+mv timelapse_1_week.webm  timelapse_week_2026-05-11.webm   # use the Monday date of the current week
+```
+
+Old archive files (`timelapse_1_week_YYYYMMDD_HHMMSS.webm`) can be renamed to `timelapse_week_YYYY-MM-DD.webm` (Monday date) or safely deleted.
+
+### ⚙️ Environment Variable Changes
+
+**Removed** (no longer used, safe to delete from your config):
+- `VIDEO_ARCHIVES_TO_KEEP` — replaced by per-type count settings below
+- `YEARLY_TIMELAPSE_PATTERN` — frame density is now automatic (`3_hourly`)
+
+**Added:**
+| Variable | Default | Description |
+|---|---|---|
+| `WEEKLY_LAPSES_TO_KEEP` | `4` | Number of calendar-week timelapses to retain |
+| `MONTHLY_LAPSES_TO_KEEP` | `3` | Number of calendar-month timelapses to retain |
+| `DAYLIGHT_TARGET_HOUR` | `12` | Hour used to pick the best image per day for monthly lapses |
+
+**Changed defaults** (if you had these set to `0`/`24` explicitly, update them):
+| Variable | Old default | New default |
+|---|---|---|
+| `DAYLIGHT_START_HOUR` | `0` | `7` |
+| `DAYLIGHT_END_HOUR` | `24` | `19` |
+
+### ✨ What's New
+- Calendar-fixed weekly, monthly, and yearly timelapses — no more drift or accumulation
+- Daylight-only frame selection for weekly/monthly/yearly lapses (7am–7pm by default)
+- Monthly lapses pick the image closest to noon each day, not the first (midnight) image
+- Yearly lapses now source from the 365-day gallery (every 3 hours), not 30-day raw snapshots
+- New `GetGalleryFiles` utility and expanded test coverage for all timelapse generation paths
+
+---
+
 ## 📦 version v0.0.4
 * Various dependency updates including sqlite, crypto packages, JWT and more
 * Updated UI - more structured approach fits on more screens, more scroll like format to show all videos

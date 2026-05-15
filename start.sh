@@ -9,7 +9,7 @@
 LOCAL_DATA_DIR="$PWD/data"
 
 # --- Docker Container Settings ---
-TAG="v0.0.4"
+TAG="${1:-latest}"
 DOCKER_IMAGE="mbern/unifi-time-machine:$TAG"
 CONTAINER_NAME="unifi-time-machine"
 HTTP_PORT="8000" # The external port to access the web UI.

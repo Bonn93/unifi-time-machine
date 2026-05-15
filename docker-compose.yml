@@ -14,7 +14,7 @@ version: '3.8'
 
 services:
   unifi-time-machine:
-    image: mbern/unifi-time-machine:v0.0.4
+    image: mbern/unifi-time-machine:latest
     container_name: unifi-time-machine
     restart: unless-stopped
     ports:
