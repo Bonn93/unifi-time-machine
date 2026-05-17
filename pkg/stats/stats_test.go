@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"time-machine/pkg/config"
+	"time-machine/pkg/database"
 	"time-machine/pkg/models"
+	"time-machine/pkg/services/settings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shirou/gopsutil/v4/mem"
@@ -26,6 +28,8 @@ func setupTest(t *testing.T) (string, func()) {
 	config.AppConfig.GalleryDir = filepath.Join(tempDir, "gallery")
 	os.MkdirAll(config.AppConfig.SnapshotsDir, 0755)
 	os.MkdirAll(config.AppConfig.GalleryDir, 0755)
+	database.InitDB()
+	settings.Init()
 
 	// Create some dummy snapshot files
 	for i := 0; i < 5; i++ {

@@ -17,6 +17,7 @@ import (
 	"time-machine/pkg/database"
 	"time-machine/pkg/jobs"
 	"time-machine/pkg/models"
+	"time-machine/pkg/services/settings"
 )
 
 func setupTestApp(t *testing.T) *gin.Engine {
@@ -31,6 +32,7 @@ func setupTestApp(t *testing.T) *gin.Engine {
 
 	// Init DB
 	database.InitDB()
+	settings.Init()
 	jobs.InitJobs(database.GetDB())
 
 	// Setup router and templates
@@ -263,9 +265,10 @@ func TestHandleDashboard_VideoGrouping(t *testing.T) {
 
 
 	// 4. Setup handler and execute request
+	settings.Set("video.daily_days", "2")
+	settings.Invalidate()
 	r.GET("/", func(c *gin.Context) {
 		c.Set("user", &models.User{Username: "test"})
-		config.AppConfig.DaysOf24HourSnapshots = 2
 		HandleDashboard(c)
 	})
 
@@ -377,7 +380,8 @@ func TestHandleShareLink(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "expiresAt")
 
 	// Test unlimited expiry
-	config.AppConfig.ShareLinkExpiryHours = 0
+	settings.Set("share.link_expiry_hours", "0")
+	settings.Invalidate()
 	req, _ = http.NewRequest("POST", "/share", strings.NewReader(form))
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()

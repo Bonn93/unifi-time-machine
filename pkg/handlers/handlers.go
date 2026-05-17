@@ -11,6 +11,7 @@ import (
 	"time-machine/pkg/config"
 	"time-machine/pkg/database"
 	"time-machine/pkg/models"
+	"time-machine/pkg/services/settings"
 	"time-machine/pkg/services/video"
 	"time-machine/pkg/stats"
 	"time-machine/pkg/util"
@@ -20,49 +21,56 @@ import (
 
 // HandleForceGenerate enqueues all timelapse jobs to be processed by the worker.
 func HandleForceGenerate(c *gin.Context) {
-	go video.EnqueueTimelapseJobs() // Run in a goroutine to not block the UI
+	go video.EnqueueTimelapseJobs()
 	c.Redirect(http.StatusFound, "/")
 }
 
-// --- HANDLERS ---
-
-// HandleHealthCheck provides a simple health check endpoint
 func HandleHealthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "healthy"})
 }
 
-// HandleLoginGet renders the login page.
 func HandleLoginGet(c *gin.Context) {
 	c.HTML(http.StatusOK, "login.html", gin.H{})
+}
+
+// findTimelapseFile looks for a timelapse video in the preferred format, then falls back to WebM.
+// Returns (diskPath, webPath, format) — all empty strings if nothing found.
+func findTimelapseFile(name, preferredFormat string) (string, string, string) {
+	for _, fmt := range []string{preferredFormat, "webm", "mp4"} {
+		dp := video.DiskPath(name, fmt)
+		if util.FileExists(dp) {
+			return dp, video.TimelapseWebPath(name, fmt), fmt
+		}
+	}
+	return "", "", ""
 }
 
 func HandleDashboard(c *gin.Context) {
 	models.VideoStatusData.RLock()
 	defer models.VideoStatusData.RUnlock()
 
-	// --- New Timelapse Data Structure ---
-	// map[TIMELAPSE_TYPE] -> list of videos
+	format := settings.Get("video.format", "webm")
+	dataDir := config.AppConfig.DataDir
+
 	availableTimelapses := make(map[string][]gin.H)
 	timelapseOrder := []string{"Daily", "Weekly", "Monthly", "Yearly"}
-
-	// Initialize all timelapse types to ensure they appear in the UI
-	for _, typeName := range timelapseOrder {
-		availableTimelapses[typeName] = []gin.H{}
+	for _, t := range timelapseOrder {
+		availableTimelapses[t] = []gin.H{}
 	}
 
-	// --- Daily 24-Hour Timelapses ---
+	// Daily 24-hour timelapses
 	var dailyVideos []gin.H
-	for i := 0; i < config.AppConfig.DaysOf24HourSnapshots; i++ {
+	for i := 0; i < settings.GetInt("video.daily_days", 30); i++ {
 		targetDate := time.Now().AddDate(0, 0, -i)
 		dateStr := targetDate.Format("2006-01-02")
-		fileName := fmt.Sprintf("timelapse_24_hour_%s.webm", dateStr)
-		filePath := filepath.Join(config.AppConfig.DataDir, fileName)
-
-		if util.FileExists(filePath) {
+		timelapseName := fmt.Sprintf("24_hour_%s", dateStr)
+		_, webPath, usedFmt := findTimelapseFile(timelapseName, format)
+		if webPath != "" {
 			dailyVideos = append(dailyVideos, gin.H{
 				"Date":        dateStr,
 				"DateDisplay": util.FormatDate(targetDate),
-				"Path":        "/data/" + fileName,
+				"Path":        webPath,
+				"Format":      usedFmt,
 			})
 		}
 	}
@@ -73,17 +81,18 @@ func HandleDashboard(c *gin.Context) {
 		availableTimelapses["Daily"] = dailyVideos
 	}
 
-	// --- Weekly, Monthly, Yearly timelapses: discovered from filesystem ---
-	allVideoFiles, err := filepath.Glob(filepath.Join(config.AppConfig.DataDir, "timelapse_*.webm"))
-	if err != nil {
-		fmt.Printf("Error globbing video files: %v\n", err)
-	}
+	// Collect weekly/monthly/yearly names from all formats present on disk
+	nameSet := collectTimelapseNames(dataDir)
 
-	for _, file := range allVideoFiles {
-		fileName := filepath.Base(file)
+	for timelapseName := range nameSet {
+		_, webPath, usedFmt := findTimelapseFile(timelapseName, format)
+		if webPath == "" {
+			continue
+		}
+
 		switch {
-		case strings.HasPrefix(fileName, "timelapse_week_"):
-			dateStr := strings.TrimPrefix(strings.TrimSuffix(fileName, ".webm"), "timelapse_week_")
+		case strings.HasPrefix(timelapseName, "week_"):
+			dateStr := strings.TrimPrefix(timelapseName, "week_")
 			weekStart, err := time.Parse("2006-01-02", dateStr)
 			displayDate := "Week of " + dateStr
 			if err == nil {
@@ -92,11 +101,12 @@ func HandleDashboard(c *gin.Context) {
 			availableTimelapses["Weekly"] = append(availableTimelapses["Weekly"], gin.H{
 				"Date":        dateStr,
 				"DateDisplay": displayDate,
-				"Path":        "/data/" + fileName,
+				"Path":        webPath,
+				"Format":      usedFmt,
 			})
 
-		case strings.HasPrefix(fileName, "timelapse_month_"):
-			monthStr := strings.TrimPrefix(strings.TrimSuffix(fileName, ".webm"), "timelapse_month_")
+		case strings.HasPrefix(timelapseName, "month_"):
+			monthStr := strings.TrimPrefix(timelapseName, "month_")
 			monthStart, err := time.Parse("2006-01", monthStr)
 			displayDate := monthStr
 			if err == nil {
@@ -105,20 +115,21 @@ func HandleDashboard(c *gin.Context) {
 			availableTimelapses["Monthly"] = append(availableTimelapses["Monthly"], gin.H{
 				"Date":        monthStr,
 				"DateDisplay": displayDate,
-				"Path":        "/data/" + fileName,
+				"Path":        webPath,
+				"Format":      usedFmt,
 			})
 
-		case strings.HasPrefix(fileName, "timelapse_year_"):
-			yearStr := strings.TrimPrefix(strings.TrimSuffix(fileName, ".webm"), "timelapse_year_")
+		case strings.HasPrefix(timelapseName, "year_"):
+			yearStr := strings.TrimPrefix(timelapseName, "year_")
 			availableTimelapses["Yearly"] = append(availableTimelapses["Yearly"], gin.H{
 				"Date":        yearStr,
 				"DateDisplay": yearStr,
-				"Path":        "/data/" + fileName,
+				"Path":        webPath,
+				"Format":      usedFmt,
 			})
 		}
 	}
 
-	// Sort each category newest first
 	for _, typeName := range []string{"Weekly", "Monthly", "Yearly"} {
 		sort.Slice(availableTimelapses[typeName], func(i, j int) bool {
 			return availableTimelapses[typeName][i]["Date"].(string) > availableTimelapses[typeName][j]["Date"].(string)
@@ -155,10 +166,48 @@ func HandleDashboard(c *gin.Context) {
 		"DefaultGalleryImages":      cachedData["daily_gallery"],
 		"AvailableDates":            cachedData["available_dates"],
 		"User":                      user.(*models.User),
-		"DateFormat":                config.AppConfig.DateFormat,
+		"VideoFormat":               format,
 	}
 
 	c.HTML(http.StatusOK, "index.html", data)
+}
+
+// collectTimelapseNames returns a set of timelapse names found in any format on disk.
+// It covers weekly/monthly/yearly only (not daily, which is date-iterated).
+func collectTimelapseNames(dataDir string) map[string]bool {
+	names := make(map[string]bool)
+
+	for _, ext := range []string{"*.webm", "*.mp4"} {
+		files, _ := filepath.Glob(filepath.Join(dataDir, "timelapse_"+ext))
+		for _, f := range files {
+			base := filepath.Base(f)
+			for _, suf := range []string{".webm", ".mp4"} {
+				base = strings.TrimSuffix(base, suf)
+			}
+			name := strings.TrimPrefix(base, "timelapse_")
+			// Include weekly/monthly/yearly but not daily (handled by date-iteration)
+			if strings.HasPrefix(name, "week_") ||
+				strings.HasPrefix(name, "month_") ||
+				strings.HasPrefix(name, "year_") {
+				names[name] = true
+			}
+		}
+	}
+
+	// HLS directories
+	hlsBase := filepath.Join(dataDir, "hls")
+	entries, _ := filepath.Glob(filepath.Join(hlsBase, "timelapse_*/master.m3u8"))
+	for _, e := range entries {
+		dir := filepath.Base(filepath.Dir(e))
+		name := strings.TrimPrefix(dir, "timelapse_")
+		if strings.HasPrefix(name, "week_") ||
+			strings.HasPrefix(name, "month_") ||
+			strings.HasPrefix(name, "year_") {
+			names[name] = true
+		}
+	}
+
+	return names
 }
 
 func HandleLog(c *gin.Context) {
@@ -185,7 +234,7 @@ func HandleLog(c *gin.Context) {
 
 	selectedDate := c.Query("date")
 	if selectedDate == "" {
-		selectedDate = dates[0] // already sorted DESC
+		selectedDate = dates[0]
 	}
 	selectedDateDisplay := util.FormatDateForDisplay(selectedDate)
 
@@ -233,9 +282,6 @@ func HandleDailyGallery(c *gin.Context) {
 		dateStr = time.Now().Format("2006-01-02")
 	}
 
-	// For simplicity, we'll just refetch if a different date is requested.
-	// Caching daily galleries for all possible dates is more complex.
-	// cache needs work...
 	if dateStr == time.Now().Format("2006-01-02") {
 		c.JSON(http.StatusOK, gin.H{
 			"date":   dateStr,
@@ -263,14 +309,16 @@ func HandleAdminPage(c *gin.Context) {
 		return
 	}
 
+	allSettings, _ := settings.GetAll()
+
 	successMessage := c.Query("success")
 	data := gin.H{
-		"User":  user.(*models.User),
-		"Users": users,
+		"User":     user.(*models.User),
+		"Users":    users,
+		"Settings": allSettings,
 	}
 	if successMessage != "" {
-		data["message"] = successMessage
-		data["messageType"] = "success"
+		data["SettingsSuccess"] = successMessage
 	}
 
 	c.HTML(http.StatusOK, "admin.html", data)
@@ -279,7 +327,7 @@ func HandleAdminPage(c *gin.Context) {
 func HandleCreateUser(c *gin.Context) {
 	username := c.PostForm("username")
 	password := c.PostForm("password")
-	isAdmin := c.PostForm("isAdmin") == "on" // Checkbox value
+	isAdmin := c.PostForm("isAdmin") == "on"
 
 	user, _ := c.Get("user")
 	templateData := gin.H{"User": user.(*models.User)}
@@ -311,11 +359,9 @@ func HandleDeleteUser(c *gin.Context) {
 	user, _ := c.Get("user")
 	loggedInUser := user.(*models.User)
 
-	// Prevent a user from deleting themselves
 	if loggedInUser.Username == username {
 		users, err := database.GetAllUsers()
 		if err != nil {
-			// Handle error fetching users, perhaps render an error page
 			c.HTML(http.StatusInternalServerError, "error.html", gin.H{"Message": "Failed to fetch user list."})
 			return
 		}
@@ -340,9 +386,6 @@ func HandleDeleteUser(c *gin.Context) {
 		return
 	}
 
-	// Redirect to the admin page with a success message
-	// Note: Using query parameters for flash messages is simple but has limitations.
-	// A more robust solution would use session-based flash messages.
 	c.Redirect(http.StatusFound, "/admin")
 }
 
@@ -378,7 +421,6 @@ func HandleChangePassword(c *gin.Context) {
 	c.Redirect(http.StatusFound, "/admin")
 }
 
-// HandleUnauthorized renders a user-friendly unauthorized error page.
 func HandleUnauthorized(c *gin.Context) {
 	c.HTML(http.StatusForbidden, "error.html", gin.H{"Message": "Unauthorized Action"})
 }
@@ -390,7 +432,6 @@ func HandleShareLink(c *gin.Context) {
 		return
 	}
 
-	// Make sure the file path is within the data directory to prevent directory traversal
 	absFilePath, err := filepath.Abs(filepath.Join(config.AppConfig.DataDir, filepath.Base(filePath)))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve file path"})
@@ -401,11 +442,10 @@ func HandleShareLink(c *gin.Context) {
 		return
 	}
 
+	expiryHours := settings.GetInt("share.link_expiry_hours", 4)
 	var expiry time.Duration
-	if config.AppConfig.ShareLinkExpiryHours > 0 {
-		expiry = time.Hour * time.Duration(config.AppConfig.ShareLinkExpiryHours)
-	} else {
-		expiry = 0 // Unlimited
+	if expiryHours > 0 {
+		expiry = time.Hour * time.Duration(expiryHours)
 	}
 
 	token, err := database.CreateShareLink(filePath, expiry)
@@ -438,7 +478,6 @@ func HandlePublicLink(c *gin.Context) {
 		return
 	}
 
-	// Again, ensure the path is safe
 	absFilePath, err := filepath.Abs(filepath.Join(config.AppConfig.DataDir, filepath.Base(filePath)))
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Failed to resolve file path")
@@ -450,4 +489,83 @@ func HandlePublicLink(c *gin.Context) {
 	}
 
 	c.File(absFilePath)
+}
+
+// knownSettingKeys lists all keys that HandleSaveSettings will accept.
+var knownSettingKeys = func() []string {
+	keys := make([]string, len(settings.KnownSettings))
+	for i, e := range settings.KnownSettings {
+		keys[i] = e.Key
+	}
+	return keys
+}()
+
+// integerSettingKeys are keys that must parse as integers.
+var integerSettingKeys = map[string]bool{
+	"snapshot.interval_sec":      true,
+	"video.cron_interval_sec":    true,
+	"video.hls_segment_sec":      true,
+	"video.daily_days":           true,
+	"snapshot.retention_days":    true,
+	"gallery.retention_days":     true,
+	"share.link_expiry_hours":    true,
+	"video.daylight_start_hour":  true,
+	"video.daylight_end_hour":    true,
+	"video.daylight_target_hour": true,
+	"video.weekly_keep":          true,
+	"video.monthly_keep":         true,
+}
+
+// HandleDataFile serves files from DataDir with correct MIME types for HLS segments and playlists.
+func HandleDataFile(c *gin.Context) {
+	fp := c.Param("filepath")
+	absPath := filepath.Join(config.AppConfig.DataDir, filepath.FromSlash(fp))
+	// Prevent path traversal
+	if !strings.HasPrefix(absPath, config.AppConfig.DataDir) {
+		c.Status(http.StatusForbidden)
+		return
+	}
+	switch {
+	case strings.HasSuffix(fp, ".m3u8"):
+		c.Header("Content-Type", "application/x-mpegURL")
+	case strings.HasSuffix(fp, ".ts"):
+		c.Header("Content-Type", "video/MP2T")
+	}
+	c.File(absPath)
+}
+
+// HandleSaveSettings validates and persists admin-submitted settings.
+func HandleSaveSettings(c *gin.Context) {
+	user, _ := c.Get("user")
+
+	for _, key := range knownSettingKeys {
+		val := c.PostForm(key)
+		if val == "" {
+			continue // unchanged / not submitted
+		}
+		if integerSettingKeys[key] {
+			if _, err := fmt.Sscanf(val, "%d", new(int)); err != nil {
+				c.HTML(http.StatusBadRequest, "admin.html", gin.H{
+					"User":        user.(*models.User),
+					"message":     fmt.Sprintf("Invalid value for %s: must be an integer", key),
+					"messageType": "error",
+				})
+				return
+			}
+		}
+		if err := settings.Set(key, val); err != nil {
+			c.HTML(http.StatusInternalServerError, "admin.html", gin.H{
+				"User":        user.(*models.User),
+				"message":     fmt.Sprintf("Failed to save setting %s: %v", key, err),
+				"messageType": "error",
+			})
+			return
+		}
+	}
+
+	// Kick off a background regeneration so format/quality changes take effect
+	// immediately rather than waiting for the next scheduled cron cycle.
+	go video.EnqueueTimelapseJobs()
+
+	c.Redirect(http.StatusFound, "/admin?success=Settings+saved.+Timelapse+regeneration+has+been+queued.")
 }

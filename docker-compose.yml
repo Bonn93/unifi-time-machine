@@ -45,16 +45,23 @@ services:
       ADMIN_PASSWORD: 'your_secure_password_here' # IMPORTANT: Change this
 
       # --- Snapshot & Video Generation ---
+      # NOTE: These seed the settings DB on first launch only.
+      #       Use Admin → Settings to change them without restarting.
+      #
       # The interval, in seconds, between each snapshot. Default is 3600 (1 hour).
       TIMELAPSE_INTERVAL: '3600'
       # How often, in seconds, to check for and generate new timelapse videos. Default is 300 (5 mins).
       VIDEO_CRON_INTERVAL: '300'
+      # Output format. Options: webm (AV1), mp4 (H.264), hls (adaptive H.264 — best for mobile).
+      VIDEO_FORMAT: 'webm'
       # Video quality setting. Options: low, medium, high, ultra.
-      VIDEO_QUALITY: 'ultra'
+      VIDEO_QUALITY: 'medium'
+      # Maximum encoding bitrate (e.g. 2M, 4M).
+      VIDEO_MAX_BITRATE: '2M'
       # Whether to use high-quality snapshots. Options: true, false, auto.
       HQSNAP: 'auto'
 
-      # --- Formatting Settings ---
+      # --- Formatting Settings (seed-only — change via Admin → Settings) ---
       # The format for displaying dates (e.g. DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD)
       DATE_FORMAT: 'DD/MM/YYYY'
       # The format for displaying times (e.g. 12h, 24h)

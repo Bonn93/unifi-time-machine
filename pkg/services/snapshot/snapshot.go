@@ -15,6 +15,7 @@ import (
 
 	"time-machine/pkg/util"
 	"time-machine/pkg/config"
+	"time-machine/pkg/services/settings"
 )
 
 var useHighQuality bool
@@ -23,7 +24,7 @@ var useHighQuality bool
 func InitSnapshotSettings() {
 	log.Println("Initializing snapshot settings...")
 
-	switch strings.ToLower(config.AppConfig.HQSnapParams) {
+	switch strings.ToLower(settings.Get("snapshot.hq_params", "auto")) {
 	case "true":
 		useHighQuality = true
 		log.Println("High Quality Snapshots enabled by environment override (HQSNAP=true).")
@@ -57,7 +58,7 @@ func InitSnapshotSettings() {
 func StartSnapshotScheduler() {
 	for {
 		TakeSnapshot()
-		time.Sleep(time.Duration(config.AppConfig.SnapshotIntervalSec) * time.Second)
+		time.Sleep(time.Duration(settings.GetInt("snapshot.interval_sec", 3600)) * time.Second)
 	}
 }
 

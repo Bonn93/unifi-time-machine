@@ -9,79 +9,37 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-
-func TestGetCRFValue(t *testing.T) {
-	c := &Config{}
-
-	c.VideoQuality = "low"
-	assert.Equal(t, "35", c.GetCRFValue())
-
-	c.VideoQuality = "medium"
-	assert.Equal(t, "28", c.GetCRFValue())
-
-	c.VideoQuality = "high"
-	assert.Equal(t, "20", c.GetCRFValue())
-
-	c.VideoQuality = "ultra"
-	assert.Equal(t, "15", c.GetCRFValue())
-
-	c.VideoQuality = "unknown"
-	assert.Equal(t, "28", c.GetCRFValue())
-}
-
 func TestLoadConfig(t *testing.T) {
-	// Unset all env vars
 	os.Clearenv()
-
-	// Set environment variables for testing
 	os.Setenv("UFP_API_KEY", "test_api_key")
 	os.Setenv("TARGET_CAMERA_ID", "test_camera_id")
 	os.Setenv("DATA_DIR", "/test/data")
-	os.Setenv("TIMELAPSE_INTERVAL", "1800")
-	os.Setenv("VIDEO_CRON_INTERVAL", "600")
 	os.Setenv("APP_KEY", base64.StdEncoding.EncodeToString([]byte("test_app_key")))
 	os.Setenv("ADMIN_PASSWORD", "test_admin_password")
-	os.Setenv("VIDEO_QUALITY", "high")
 	os.Setenv("SNAPSHOTS_DIR", "test_snapshots")
 	os.Setenv("GALLERY_DIR", "test_gallery")
-	os.Setenv("HQSNAP", "high_quality")
 	os.Setenv("UFP_HOST", "testhost")
-	os.Setenv("DAYS_OF_24_HOUR_SNAPSHOTS", "7")
-	os.Setenv("SHARE_LINK_EXPIRY_HOURS", "8")
 
 	LoadConfig()
 
 	assert.Equal(t, "test_api_key", AppConfig.UFPAPIKey)
 	assert.Equal(t, "test_camera_id", AppConfig.TargetCameraID)
 	assert.Equal(t, "/test/data", AppConfig.DataDir)
-	assert.Equal(t, 1800, AppConfig.SnapshotIntervalSec)
-	assert.Equal(t, 600, AppConfig.VideoCronIntervalSec)
 	assert.Equal(t, base64.StdEncoding.EncodeToString([]byte("test_app_key")), AppConfig.AppKey)
 	assert.Equal(t, "test_admin_password", AppConfig.AdminPassword)
-	assert.Equal(t, "high", AppConfig.VideoQuality)
 	assert.True(t, strings.HasSuffix(AppConfig.SnapshotsDir, "test_snapshots"))
 	assert.True(t, strings.HasSuffix(AppConfig.GalleryDir, "test_gallery"))
 	assert.Equal(t, "https://testhost", AppConfig.UFPHost)
-	assert.Equal(t, "high_quality", AppConfig.HQSnapParams)
-	assert.Equal(t, 7, AppConfig.DaysOf24HourSnapshots)
-	assert.Equal(t, 8, AppConfig.ShareLinkExpiryHours)
 
-	// Test default values
+	// Test defaults
 	os.Clearenv()
 	os.Setenv("APP_KEY", base64.StdEncoding.EncodeToString([]byte("test_app_key")))
 	LoadConfig()
 	assert.Equal(t, "", AppConfig.UFPAPIKey)
 	assert.Equal(t, "", AppConfig.TargetCameraID)
 	assert.True(t, strings.HasSuffix(AppConfig.DataDir, "data"))
-	assert.Equal(t, 3600, AppConfig.SnapshotIntervalSec)
-	assert.Equal(t, 300, AppConfig.VideoCronIntervalSec)
-	assert.Equal(t, "medium", AppConfig.VideoQuality)
 	assert.True(t, strings.HasSuffix(AppConfig.SnapshotsDir, "snapshots"))
 	assert.True(t, strings.HasSuffix(AppConfig.GalleryDir, "gallery"))
-	assert.Equal(t, "auto", AppConfig.HQSnapParams)
-	assert.Equal(t, 30, AppConfig.DaysOf24HourSnapshots)
-	assert.Equal(t, 30, AppConfig.SnapshotRetentionDays)
-	assert.Equal(t, 4, AppConfig.ShareLinkExpiryHours)
 }
 
 func TestGetEnvAsInt(t *testing.T) {

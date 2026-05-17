@@ -86,6 +86,14 @@ var migrations = []migration{
 		"created_at" DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`},
 	{7, `CREATE INDEX IF NOT EXISTS idx_ffmpeg_logs_date ON ffmpeg_logs (log_date)`},
+	{8, `CREATE TABLE IF NOT EXISTS settings (
+		key TEXT NOT NULL PRIMARY KEY,
+		value TEXT NOT NULL,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`},
+	{9, `CREATE TRIGGER IF NOT EXISTS update_settings_updated_at
+		AFTER UPDATE ON settings FOR EACH ROW
+		BEGIN UPDATE settings SET updated_at = CURRENT_TIMESTAMP WHERE key = OLD.key; END`},
 }
 
 // RunMigrations creates the schema_migrations table if needed and applies any
@@ -217,6 +225,54 @@ func InitDB() {
 	MigrateLogFiles()
 
 	log.Println("Database initialized successfully.")
+}
+
+// --- Settings ---
+
+// InsertSettingIfAbsent inserts a setting only if the key doesn't already exist.
+func InsertSettingIfAbsent(key, value string) error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	_, err := db.Exec(
+		"INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+		key, value,
+	)
+	return err
+}
+
+// SetSetting upserts a setting value.
+func SetSetting(key, value string) error {
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	_, err := db.Exec(
+		`INSERT INTO settings (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		key, value,
+	)
+	return err
+}
+
+// GetAllSettings returns all settings as a key→value map.
+func GetAllSettings() (map[string]string, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+	rows, err := db.Query("SELECT key, value FROM settings")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := make(map[string]string)
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		m[k] = v
+	}
+	return m, rows.Err()
 }
 
 // --- Timelapse tracker ---

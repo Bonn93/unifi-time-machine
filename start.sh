@@ -9,7 +9,7 @@
 LOCAL_DATA_DIR="$PWD/data"
 
 # --- Docker Container Settings ---
-TAG="${1:-latest}"
+TAG="devel"
 DOCKER_IMAGE="mbern/unifi-time-machine:$TAG"
 CONTAINER_NAME="unifi-time-machine"
 HTTP_PORT="8000" # The external port to access the web UI.
@@ -24,7 +24,7 @@ UFP_HOST="192.168.1.1"
 
 # The ID of the camera you want to capture snapshots from.
 # You can find this in the URL when viewing the camera in the Protect web UI.
-TARGET_CAMERA_ID="68cbac880021ec03e401c50e"
+TARGET_CAMERA_ID="6a08049d006d1503e42c490a"
 
 
 # --- Authentication Settings ---
@@ -38,17 +38,28 @@ ADMIN_PASSWORD="VerySecure123"
 
 
 # --- Timelapse and Video Generation Settings ---
+# NOTE: These env vars seed the settings DB on first launch only.
+#       After the first run they can be changed via the Admin → Settings panel
+#       without restarting the container.
+
 # The interval, in seconds, between each snapshot.
 # Default is 3600 (1 hour). A value of 2 is very frequent.
-TIMELAPSE_INTERVAL="60"
+TIMELAPSE_INTERVAL="5"
 
 # The interval, in seconds, at which to generate a new timelapse video.
 # Default is 300 (5 minutes).
 VIDEO_CRON_INTERVAL="600"
 
+# Output format for timelapse videos.
+# Options: webm (AV1), mp4 (H.264), hls (H.264 adaptive streaming — best for mobile/remote)
+VIDEO_FORMAT="webm"
+
 # The quality of the generated video.
 # Options: low, medium, high, ultra
 VIDEO_QUALITY="ultra"
+
+# Maximum encoding bitrate (e.g. 2M, 4M).
+VIDEO_MAX_BITRATE="2M"
 
 # --- High-Quality Snapshot Settings ---
 # Determines if high-quality snapshots are used.
@@ -132,10 +143,12 @@ docker run -d --name "$CONTAINER_NAME" \
   -e TARGET_CAMERA_ID="$TARGET_CAMERA_ID" \
   -e TIMELAPSE_INTERVAL="$TIMELAPSE_INTERVAL" \
   -e VIDEO_CRON_INTERVAL="$VIDEO_CRON_INTERVAL" \
+  -e VIDEO_FORMAT="$VIDEO_FORMAT" \
+  -e VIDEO_QUALITY="$VIDEO_QUALITY" \
+  -e VIDEO_MAX_BITRATE="$VIDEO_MAX_BITRATE" \
   -e DAYS_OF_24_HOUR_SNAPSHOTS="$DAYS_OF_24_HOUR_SNAPSHOTS" \
   -e SNAPSHOT_RETENTION_DAYS="$SNAPSHOT_RETENTION_DAYS" \
   -e GALLERY_RETENTION_DAYS="$GALLERY_RETENTION_DAYS" \
-  -e VIDEO_QUALITY="$VIDEO_QUALITY" \
   -e SNAPSHOTS_DIR="$SNAPSHOTS_DIR" \
   -e GALLERY_DIR="$GALLERY_DIR" \
   -e GIN_MODE="$GIN_MODE" \
