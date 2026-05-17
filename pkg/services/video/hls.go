@@ -56,6 +56,47 @@ func parseHLSQualities(raw string) []HLSQuality {
 	return qualities
 }
 
+// firstFileInConcatList returns the path of the first 'file' entry in an ffmpeg
+// concat list, or an empty string if the file cannot be read or has no entries.
+func firstFileInConcatList(concatListPath string) string {
+	data, err := os.ReadFile(concatListPath)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "file ") {
+			return strings.Trim(strings.TrimPrefix(line, "file "), "'")
+		}
+	}
+	return ""
+}
+
+// probeVideoDimensions runs ffprobe on a file and returns its first video stream's
+// width and height. Returns (0, 0) on any error so callers can fall back gracefully.
+func probeVideoDimensions(filePath string) (int, int) {
+	out, err := exec.Command("ffprobe",
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=width,height",
+		"-of", "csv=p=0",
+		filePath,
+	).Output()
+	if err != nil {
+		return 0, 0
+	}
+	parts := strings.SplitN(strings.TrimSpace(string(out)), ",", 2)
+	if len(parts) != 2 {
+		return 0, 0
+	}
+	w, err1 := strconv.Atoi(parts[0])
+	h, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil || w <= 0 || h <= 0 {
+		return 0, 0
+	}
+	return w, h
+}
+
 // generateHLS encodes all quality levels in one FFmpeg pass using filter_complex.
 // Segments land in {DataDir}/hls/timelapse_{name}/{label}/ and a master.m3u8 is written.
 func generateHLS(name, concatListPath string, qualities []HLSQuality) error {
@@ -135,7 +176,15 @@ func generateHLS(name, concatListPath string, qualities []HLSQuality) error {
 		return fmt.Errorf("ffmpeg HLS encode failed for %s: %w", name, err)
 	}
 
-	if err := writeMasterPlaylist(hlsDir, qualities); err != nil {
+	// Probe the source frame resolution so the master playlist carries an accurate
+	// RESOLUTION tag for the pass-through level. This lets VHS and the quality
+	// selector correctly identify and label the 4K (or other) source rendition.
+	var sourceW, sourceH int
+	if firstSnap := firstFileInConcatList(concatListPath); firstSnap != "" {
+		sourceW, sourceH = probeVideoDimensions(firstSnap)
+	}
+
+	if err := writeMasterPlaylist(hlsDir, qualities, sourceW, sourceH); err != nil {
 		return err
 	}
 	log.Printf("Generated HLS: %s", hlsDir)
@@ -143,14 +192,22 @@ func generateHLS(name, concatListPath string, qualities []HLSQuality) error {
 }
 
 // writeMasterPlaylist writes an HLS master.m3u8 referencing each quality level.
-func writeMasterPlaylist(hlsDir string, qualities []HLSQuality) error {
+// sourceW/sourceH are the probed pixel dimensions of the source frames; they are
+// written as the RESOLUTION tag for any pass-through (Height==0) quality level.
+// Both may be 0 if probing failed, in which case the source entry has no RESOLUTION.
+func writeMasterPlaylist(hlsDir string, qualities []HLSQuality, sourceW, sourceH int) error {
 	var sb strings.Builder
 	sb.WriteString("#EXTM3U\n#EXT-X-VERSION:3\n")
 	for _, q := range qualities {
-		resTag := ""
-		if q.Height > 0 {
+		var resTag string
+		switch {
+		case q.Height > 0:
+			// Downscaled variant — compute width from target height assuming 16:9.
 			w := q.Height * 16 / 9
 			resTag = fmt.Sprintf(",RESOLUTION=%dx%d", w, q.Height)
+		case sourceW > 0 && sourceH > 0:
+			// Pass-through source level — use the probed actual camera resolution.
+			resTag = fmt.Sprintf(",RESOLUTION=%dx%d", sourceW, sourceH)
 		}
 		sb.WriteString(fmt.Sprintf(
 			"#EXT-X-STREAM-INF:BANDWIDTH=%d%s,NAME=\"%s\"\n%s/index.m3u8\n",

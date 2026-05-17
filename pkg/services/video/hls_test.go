@@ -72,7 +72,8 @@ func TestWriteMasterPlaylist(t *testing.T) {
 		{Label: "source", Height: 0, CRF: 28, Bandwidth: 4_000_000},
 	}
 
-	err := writeMasterPlaylist(tempDir, qs)
+	// Without probed dimensions, source should have no RESOLUTION tag.
+	err := writeMasterPlaylist(tempDir, qs, 0, 0)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(tempDir, "master.m3u8"))
@@ -85,10 +86,33 @@ func TestWriteMasterPlaylist(t *testing.T) {
 	assert.Contains(t, text, "source/index.m3u8")
 	assert.Contains(t, text, "BANDWIDTH=2000000")
 	assert.Contains(t, text, "RESOLUTION=1280x720")
-	// Source entry should not carry a RESOLUTION tag — verify source line
 	for _, line := range strings.Split(text, "\n") {
 		if strings.Contains(line, "NAME=\"source\"") {
-			assert.NotContains(t, line, "RESOLUTION=", "source EXT-X-STREAM-INF must not have RESOLUTION")
+			assert.NotContains(t, line, "RESOLUTION=", "source without probed dims must not have RESOLUTION")
+		}
+	}
+}
+
+func TestWriteMasterPlaylist_WithSourceResolution(t *testing.T) {
+	tempDir := t.TempDir()
+	qs := []HLSQuality{
+		{Label: "source", Height: 0, CRF: 23, Bandwidth: 4_000_000},
+		{Label: "720p", Height: 720, CRF: 25, Bandwidth: 2_000_000},
+	}
+
+	// With probed 4K dimensions, source should carry RESOLUTION=3840x2160.
+	err := writeMasterPlaylist(tempDir, qs, 3840, 2160)
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(filepath.Join(tempDir, "master.m3u8"))
+	require.NoError(t, err)
+
+	text := string(content)
+	assert.Contains(t, text, "RESOLUTION=3840x2160", "source must carry probed 4K resolution")
+	assert.Contains(t, text, "RESOLUTION=1280x720")
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "NAME=\"source\"") {
+			assert.Contains(t, line, "RESOLUTION=3840x2160", "source line must carry probed resolution")
 		}
 	}
 }

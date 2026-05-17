@@ -25,8 +25,15 @@ document.addEventListener('DOMContentLoaded', () => {
             playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2],
             html5: {
                 vhs: {
-                    // Let VHS handle HLS on all browsers; Safari uses native only as fallback
                     overrideNative: !videojs.browser.IS_SAFARI,
+                    // Never cap quality to the player element's pixel dimensions.
+                    // Without this, VHS refuses to serve 4K into a sub-4K player box,
+                    // and manual quality changes to source are silently overridden.
+                    limitRenditionByPlayerDimensions: false,
+                    // Start with a high bandwidth estimate (16 Mbps) so VHS immediately
+                    // selects the highest available quality level rather than ramping up
+                    // from the lowest. On a LAN the first real measurement confirms this.
+                    bandwidth: 16000000,
                 },
             },
         });
