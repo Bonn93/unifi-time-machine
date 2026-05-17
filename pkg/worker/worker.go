@@ -13,9 +13,9 @@ import (
 
 func processJob(job *models.Job) {
 	log.Printf("Processing job %d: %s", job.ID, job.JobType)
-	err := jobs.UpdateJobStatus(job.ID, "running", nil)
+	err := jobs.UpdateJobStatus(job.ID, "processing", nil)
 	if err != nil {
-		log.Printf("Error updating job status to running: %v", err)
+		log.Printf("Error updating job status to processing: %v", err)
 		return
 	}
 

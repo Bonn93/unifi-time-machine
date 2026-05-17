@@ -24,6 +24,9 @@ func SetupRouter() *gin.Engine {
 	})
 	r.LoadHTMLGlob("web/templates/*")
 
+	// Health check endpoint
+	r.GET("/health", handlers.HandleHealthCheck)
+
 	// Login page route (GET) - serves the login HTML
 	r.GET("/login", handlers.HandleLoginGet)
 	// Login API endpoint (POST) - handles login logic and JWT issuance

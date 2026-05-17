@@ -1,0 +1,43 @@
+version: 2
+
+# We don't distribute Go binaries — skip the build step entirely.
+# Docker images are built separately in the workflow using docker/build-push-action,
+# which handles the full repo build context correctly.
+builds:
+  - skip: true
+
+# Changelog is generated from git history between tags.
+# Adopt Conventional Commits (feat:, fix:, chore:) for automatic grouping.
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^chore\(deps\):'     # Renovate noise
+      - '^Merge pull request'
+      - '^Merge branch'
+  groups:
+    - title: New Features
+      regexp: '^feat'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^fix'
+      order: 1
+    - title: Other Changes
+      order: 999
+
+# GitHub Release — attaches RELEASE_NOTES.txt as a downloadable asset.
+release:
+  extra_files:
+    - glob: RELEASE_NOTES.txt
+  footer: |
+    ---
+    ## Docker
+
+    ```bash
+    # Docker Compose (recommended)
+    image: mbern/unifi-time-machine:{{ .Tag }}
+
+    # Docker run
+    docker pull mbern/unifi-time-machine:{{ .Tag }}
+    ```

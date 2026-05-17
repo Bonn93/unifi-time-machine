@@ -13,14 +13,27 @@ func InitJobs(database *sql.DB) {
 	db = database
 }
 
-// CreateJob creates a new job in the database.
+// CreateJob creates a new job in the database, skipping if an identical job is already pending or processing.
 var CreateJob = func(jobType string, payload interface{}) (int64, error) {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal job payload: %w", err)
 	}
+	payloadStr := string(payloadBytes)
 
-	res, err := db.Exec("INSERT INTO jobs (job_type, payload) VALUES (?, ?)", jobType, string(payloadBytes))
+	var count int
+	err = db.QueryRow(
+		"SELECT COUNT(*) FROM jobs WHERE job_type = ? AND payload = ? AND status IN ('pending', 'processing')",
+		jobType, payloadStr,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to check for duplicate job: %w", err)
+	}
+	if count > 0 {
+		return 0, nil // Already queued or running — skip silently
+	}
+
+	res, err := db.Exec("INSERT INTO jobs (job_type, payload) VALUES (?, ?)", jobType, payloadStr)
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert job: %w", err)
 	}

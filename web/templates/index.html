@@ -105,7 +105,7 @@
                                     <div class="flex-grow-1 me-2">
                                         <select id="select-{{$typeName}}" class="form-select timelapse-select" data-video-target="video-{{$typeName}}" data-download-target="download-{{$typeName}}">
                                             {{ range $videos }}
-                                                <option value="{{.Path}}">{{.Date}}</option>
+                                                <option value="{{.Path}}">{{.DateDisplay}}</option>
                                             {{ end }}
                                         </select>
                                     </div>
@@ -141,7 +141,7 @@
                         <select id="date-select" class="form-select"></select>
                     </div>
                     <div class="col-md-9 pt-4">
-                        <p class="text-secondary" id="gallery-info">Displaying hourly snapshots for <span class="text-primary-highlight" id="current-gallery-date">{{.DefaultGalleryDate}}</span>.</p>
+                        <p class="text-secondary" id="gallery-info">Displaying hourly snapshots for <span class="text-primary-highlight" id="current-gallery-date">{{.DefaultGalleryDateDisplay}}</span>.</p>
                     </div>
                 </div>
                 <div class="row row-cols-3 row-cols-md-6 row-cols-lg-12 g-2" id="gallery-grid"></div>

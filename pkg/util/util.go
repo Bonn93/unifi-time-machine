@@ -54,6 +54,28 @@ func GetSnapshotFiles() []string {
 	return files
 }
 
+// GetGalleryFiles returns all gallery images sorted chronologically.
+// Gallery files are named YYYY-MM-DD-HH.jpg and have up to 365 days of retention,
+// making them suitable as the image source for weekly, monthly, and yearly timelapses.
+func GetGalleryFiles() []string {
+	var files []string
+	err := filepath.WalkDir(config.AppConfig.GalleryDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".jpg") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		log.Printf("Error walking gallery directory: %v", err)
+		return []string{}
+	}
+	sort.Strings(files)
+	return files
+}
+
 func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return !os.IsNotExist(err)

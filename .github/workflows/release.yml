@@ -6,7 +6,7 @@ on:
       - 'v*.*.*'
 
 jobs:
-  build:
+  docker:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -25,20 +25,34 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push
-        id: docker_build
         uses: docker/build-push-action@v7
         with:
           platforms: linux/amd64,linux/arm64
           context: .
           push: true
-          tags: mbern/unifi-time-machine:${{ github.ref_name }}
+          tags: |
+            mbern/unifi-time-machine:${{ github.ref_name }}
+            mbern/unifi-time-machine:latest
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v3
+  github-release:
+    runs-on: ubuntu-latest
+    needs: docker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
         with:
-          token: ${{ secrets.PAT_TOKEN }}
-          tag_name: ${{ github.ref_name }}
-          generate_release_notes: true  # Auto-generates "What's Changed" list
-          body_path: RELEASE_NOTES.txt   # Optional: Reads this file for extra details
-          draft: false
-          prerelease: false
+          fetch-depth: 0  # GoReleaser needs full git history to generate the changelog
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}

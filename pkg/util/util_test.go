@@ -80,3 +80,47 @@ func TestIsFileEmpty(t *testing.T) {
 	assert.False(t, IsFileEmpty(nonEmptyFile))
 	assert.True(t, IsFileEmpty(nonExistingFile))
 }
+
+func TestGetGalleryFiles(t *testing.T) {
+	tempDir, cleanup := setupTest(t)
+	defer cleanup()
+
+	galleryDir := filepath.Join(tempDir, "gallery")
+	os.MkdirAll(galleryDir, 0755)
+
+	originalGalleryDir := config.AppConfig.GalleryDir
+	config.AppConfig.GalleryDir = galleryDir
+	defer func() { config.AppConfig.GalleryDir = originalGalleryDir }()
+
+	// Gallery files use the 4-part YYYY-MM-DD-HH.jpg format
+	names := []string{"2026-05-15-07.jpg", "2026-05-15-12.jpg", "2026-05-15-18.jpg"}
+	for _, name := range names {
+		os.WriteFile(filepath.Join(galleryDir, name), []byte("g"), 0644)
+	}
+	// Non-jpg file should be ignored
+	os.WriteFile(filepath.Join(galleryDir, "notes.txt"), []byte("x"), 0644)
+
+	files := GetGalleryFiles()
+	assert.Len(t, files, 3, "should return only .jpg files")
+	assert.True(t, sort.StringsAreSorted(files), "results must be sorted chronologically")
+
+	// Verify the paths end with the expected filenames
+	for i, name := range names {
+		assert.Equal(t, name, filepath.Base(files[i]))
+	}
+}
+
+func TestGetGalleryFiles_EmptyDir(t *testing.T) {
+	tempDir, _ := os.MkdirTemp("", "empty-gallery-test")
+	defer os.RemoveAll(tempDir)
+
+	galleryDir := filepath.Join(tempDir, "gallery")
+	os.MkdirAll(galleryDir, 0755)
+
+	originalGalleryDir := config.AppConfig.GalleryDir
+	config.AppConfig.GalleryDir = galleryDir
+	defer func() { config.AppConfig.GalleryDir = originalGalleryDir }()
+
+	files := GetGalleryFiles()
+	assert.Empty(t, files, "empty gallery directory should return no files")
+}

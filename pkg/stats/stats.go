@@ -30,11 +30,11 @@ var (
 
 // SystemStats holds the CPU and memory usage data.
 type SystemStats struct {
-	mu          sync.RWMutex
-	CPUUsage    float64
-	Memory      *mem.VirtualMemoryStat
-	OS          string
-	IsReady     bool
+	mu       sync.RWMutex
+	CPUUsage float64
+	Memory   *mem.VirtualMemoryStat
+	OS       string
+	IsReady  bool
 }
 
 var currentStats = &SystemStats{
@@ -134,7 +134,7 @@ var GetLastImageTime = func() string {
 	if err != nil {
 		return "N/A (Parse Error)"
 	}
-	return t.Format("2006-01-02 15:04:05")
+	return util.FormatDateTime(t)
 }
 
 var GetLastProcessedImageName = func() string {
@@ -207,11 +207,11 @@ var GetSystemInfo = func() gin.H {
 }
 
 // GetAvailableImageDates now scans the flat gallery directory.
-var GetAvailableImageDates = func() []string {
+var GetAvailableImageDates = func() []map[string]string {
 	files, err := os.ReadDir(config.AppConfig.GalleryDir)
 	if err != nil {
 		log.Printf("Error reading gallery directory: %v", err)
-		return []string{}
+		return []map[string]string{}
 	}
 
 	dateSet := make(map[string]struct{})
@@ -232,9 +232,16 @@ var GetAvailableImageDates = func() []string {
 	}
 
 	sort.Sort(sort.Reverse(sort.StringSlice(dates)))
-	return dates
-}
 
+	var result []map[string]string
+	for _, d := range dates {
+		result = append(result, map[string]string{
+			"value":   d,
+			"display": util.FormatDateForDisplay(d),
+		})
+	}
+	return result
+}
 
 // GetDailyGallery now uses the dedicated, retained gallery images.
 var GetDailyGallery = func(dateStr string) []map[string]string {
@@ -292,4 +299,3 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return !os.IsNotExist(err)
 }
-

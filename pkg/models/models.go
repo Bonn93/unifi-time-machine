@@ -20,7 +20,9 @@ type VideoStatus struct {
 type TimelapseConfig struct {
 	Name         string
 	Duration     time.Duration
-	FramePattern string // "all", "hourly", "daily"
+	FramePattern string    // "all", "hourly", "daily", "N_hourly"
+	WindowStart  time.Time // fixed window start; zero means use Duration relative to targetTime
+	WindowEnd    time.Time // fixed window end
 }
 
 // Job represents a job in the database job queue.
@@ -48,10 +50,3 @@ var VideoStatusData = &VideoStatus{
 	CurrentFile:         "",
 }
 
-// might change this to "year to date" rather than a full year for performance as its more clear
-
-var TimelapseConfigsData = []TimelapseConfig{
-	{Name: "1_week", Duration: 7 * 24 * time.Hour, FramePattern: "hourly"},
-	{Name: "1_month", Duration: 30 * 24 * time.Hour, FramePattern: "daily"},
-	{Name: "1_year", Duration: 365 * 24 * time.Hour, FramePattern: "daily"}, // Using daily for year as well for simplicity
-}

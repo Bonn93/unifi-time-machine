@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,8 +24,8 @@ import (
 // heavy AI assist here, review carefully... since FFPMEG, AV1 and WEBM is tricky
 
 var (
-	PreferredVideoCodec string
-	ffmpegThreads       int
+	PreferredVideoCodec    string
+	ffmpegThreads          int
 	onceDetectCapabilities sync.Once
 )
 
@@ -89,7 +90,7 @@ var createVideoSegment = func(imagePath, segmentPath string) error {
 			"-t", "0.0333", // 1 frame at 30fps
 			"-vf", videoFilter,
 			"-c:v", PreferredVideoCodec,
-			"-preset", "8",
+			"-preset", "10",
 			"-threads", fmt.Sprintf("%d", ffmpegThreads),
 			"-g", "1", // Force Intra frame
 			"-keyint_min", "1",
@@ -231,42 +232,59 @@ func StartVideoGeneratorScheduler() {
 	}
 }
 
+// calendarWeekMonday returns the Monday of the week containing t, at midnight.
+func calendarWeekMonday(t time.Time) time.Time {
+	weekday := int(t.Weekday())
+	if weekday == 0 {
+		weekday = 7 // Sunday = 7 in ISO week
+	}
+	return t.AddDate(0, 0, -(weekday - 1)).Truncate(24 * time.Hour)
+}
+
 func EnqueueTimelapseJobs() {
 	log.Println("Enqueuing timelapse generation jobs...")
+	now := time.Now()
 
-	// Dynamically enqueue jobs for daily 24-hour snapshots
+	// Daily 24-hour timelapses
 	for i := 0; i < config.AppConfig.DaysOf24HourSnapshots; i++ {
-		targetDate := time.Now().AddDate(0, 0, -i)
+		targetDate := now.AddDate(0, 0, -i)
 		timelapseName := fmt.Sprintf("24_hour_%s", targetDate.Format("2006-01-02"))
-		payload := map[string]string{"timelapse_name": timelapseName}
-		_, err := jobs.CreateJob("generate_timelapse", payload)
-		if err != nil {
+		if _, err := jobs.CreateJob("generate_timelapse", map[string]string{"timelapse_name": timelapseName}); err != nil {
 			log.Printf("Error enqueuing job for daily timelapse %s: %v", timelapseName, err)
 		}
 	}
 
-	for _, cfg := range models.TimelapseConfigsData {
-		payload := map[string]string{"timelapse_name": cfg.Name}
-		_, err := jobs.CreateJob("generate_timelapse", payload)
-		if err != nil {
-			log.Printf("Error enqueuing job for timelapse %s: %v", cfg.Name, err)
+	// Calendar-week timelapses: last WeeklyLapsesToKeep Mondays
+	currentMonday := calendarWeekMonday(now)
+	for i := 0; i < config.AppConfig.WeeklyLapsesToKeep; i++ {
+		monday := currentMonday.AddDate(0, 0, -7*i)
+		timelapseName := fmt.Sprintf("week_%s", monday.Format("2006-01-02"))
+		if _, err := jobs.CreateJob("generate_timelapse", map[string]string{"timelapse_name": timelapseName}); err != nil {
+			log.Printf("Error enqueuing job for weekly timelapse %s: %v", timelapseName, err)
 		}
 	}
 
-	if _, err := jobs.CreateJob("cleanup_snapshots", nil); err != nil {
-		log.Printf("Error enqueuing cleanup_snapshots job: %v", err)
+	// Calendar-month timelapses: last MonthlyLapsesToKeep months
+	for i := 0; i < config.AppConfig.MonthlyLapsesToKeep; i++ {
+		monthStart := time.Date(now.Year(), now.Month()-time.Month(i), 1, 0, 0, 0, 0, now.Location())
+		timelapseName := fmt.Sprintf("month_%s", monthStart.Format("2006-01"))
+		if _, err := jobs.CreateJob("generate_timelapse", map[string]string{"timelapse_name": timelapseName}); err != nil {
+			log.Printf("Error enqueuing job for monthly timelapse %s: %v", timelapseName, err)
+		}
 	}
-	if _, err := jobs.CreateJob("cleanup_videos", nil); err != nil {
-		log.Printf("Error enqueuing cleanup_videos job: %v", err)
+
+	// Year-to-date timelapse
+	yearName := fmt.Sprintf("year_%d", now.Year())
+	if _, err := jobs.CreateJob("generate_timelapse", map[string]string{"timelapse_name": yearName}); err != nil {
+		log.Printf("Error enqueuing job for yearly timelapse %s: %v", yearName, err)
 	}
-	if _, err := jobs.CreateJob("cleanup_logs", nil); err != nil {
-		log.Printf("Error enqueuing cleanup_logs job: %v", err)
-	}
-	if _, err := jobs.CreateJob("cleanup_gallery", nil); err != nil {
-		log.Printf("Error enqueuing cleanup_gallery job: %v", err)
+
+	for _, jobType := range []string{"cleanup_snapshots", "cleanup_videos", "cleanup_logs", "cleanup_gallery"} {
+		if _, err := jobs.CreateJob(jobType, nil); err != nil {
+			log.Printf("Error enqueuing %s job: %v", jobType, err)
+		}
 	}
 }
-
 
 var GenerateSingleTimelapse = func(timelapseName string) error {
 	log.Printf("--- Processing timelapse: %s ---", timelapseName)
@@ -274,9 +292,10 @@ var GenerateSingleTimelapse = func(timelapseName string) error {
 
 	var cfg models.TimelapseConfig
 	var targetDate = time.Now()
+	var useGallery bool
 
-	if strings.HasPrefix(timelapseName, "24_hour_") {
-		// This is a dynamically generated 24-hour daily timelapse
+	switch {
+	case strings.HasPrefix(timelapseName, "24_hour_"):
 		dateStr := strings.TrimPrefix(timelapseName, "24_hour_")
 		parsedDate, err := time.Parse("2006-01-02", dateStr)
 		if err != nil {
@@ -288,29 +307,95 @@ var GenerateSingleTimelapse = func(timelapseName string) error {
 			Duration:     24 * time.Hour,
 			FramePattern: "all",
 		}
-	} else {
-		// This is one of the pre-defined timelapses (1_week, 1_month, 1_year)
-		for _, c := range models.TimelapseConfigsData {
-			if c.Name == timelapseName {
-				cfg = c
-				break
-			}
+
+	case strings.HasPrefix(timelapseName, "week_"):
+		// Calendar week: Monday to Sunday, fixed window, sourced from gallery
+		dateStr := strings.TrimPrefix(timelapseName, "week_")
+		monday, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			return fmt.Errorf("invalid date format in timelapse name %s: %w", timelapseName, err)
 		}
-		if cfg.Name == "" {
-			return fmt.Errorf("no timelapse configuration found for name: %s", timelapseName)
+		// Skip if outside the active retention window — stale queue jobs can reference old weeks.
+		currentMonday := calendarWeekMonday(time.Now())
+		keepWeeks := config.AppConfig.WeeklyLapsesToKeep
+		if keepWeeks < 1 {
+			keepWeeks = 1
 		}
+		oldestAllowedWeek := currentMonday.AddDate(0, 0, -7*(keepWeeks-1))
+		if monday.Before(oldestAllowedWeek) {
+			log.Printf("Skipping %s: outside retention window (oldest allowed: %s).", timelapseName, oldestAllowedWeek.Format("2006-01-02"))
+			return nil
+		}
+		cfg = models.TimelapseConfig{
+			Name:         timelapseName,
+			FramePattern: "hourly",
+			WindowStart:  monday,
+			WindowEnd:    monday.AddDate(0, 0, 7),
+		}
+		useGallery = true
+
+	case strings.HasPrefix(timelapseName, "month_"):
+		// Calendar month: fixed window, one noon image per day, sourced from gallery
+		monthStr := strings.TrimPrefix(timelapseName, "month_")
+		monthStart, err := time.Parse("2006-01", monthStr)
+		if err != nil {
+			return fmt.Errorf("invalid month format in timelapse name %s: %w", timelapseName, err)
+		}
+		// Skip if outside the active retention window.
+		now := time.Now()
+		keepMonths := config.AppConfig.MonthlyLapsesToKeep
+		if keepMonths < 1 {
+			keepMonths = 1
+		}
+		oldestAllowedMonth := time.Date(now.Year(), now.Month()-time.Month(keepMonths-1), 1, 0, 0, 0, 0, now.Location())
+		if monthStart.Before(oldestAllowedMonth) {
+			log.Printf("Skipping %s: outside retention window (oldest allowed: %s).", timelapseName, oldestAllowedMonth.Format("2006-01"))
+			return nil
+		}
+		nextMonth := time.Date(monthStart.Year(), monthStart.Month()+1, 1, 0, 0, 0, 0, monthStart.Location())
+		cfg = models.TimelapseConfig{
+			Name:         timelapseName,
+			FramePattern: "daily",
+			WindowStart:  monthStart,
+			WindowEnd:    nextMonth,
+		}
+		useGallery = true
+
+	case strings.HasPrefix(timelapseName, "year_"):
+		// Year-to-date: a few images per day via 3_hourly, sourced from gallery
+		yearStr := strings.TrimPrefix(timelapseName, "year_")
+		year, err := strconv.Atoi(yearStr)
+		if err != nil {
+			return fmt.Errorf("invalid year format in timelapse name %s: %w", timelapseName, err)
+		}
+		loc := time.Now().Location()
+		cfg = models.TimelapseConfig{
+			Name:         timelapseName,
+			FramePattern: "3_hourly",
+			WindowStart:  time.Date(year, time.January, 1, 0, 0, 0, 0, loc),
+			WindowEnd:    time.Date(year+1, time.January, 1, 0, 0, 0, 0, loc),
+		}
+		useGallery = true
+
+	default:
+		return fmt.Errorf("no timelapse configuration found for name: %s", timelapseName)
 	}
 
-	allSnapshots := util.GetSnapshotFiles()
-	if len(allSnapshots) == 0 {
-		log.Println("No snapshots available to generate videos.")
+	var allFiles []string
+	if useGallery {
+		allFiles = util.GetGalleryFiles()
+	} else {
+		allFiles = util.GetSnapshotFiles()
+	}
+	if len(allFiles) == 0 {
+		log.Println("No source files available to generate timelapse.")
 		return nil
 	}
 
 	outputFileName := fmt.Sprintf("timelapse_%s.webm", cfg.Name)
 	finalVideoPath := filepath.Join(config.AppConfig.DataDir, outputFileName)
 
-	snapshotsForTimelapse := filterSnapshots(allSnapshots, cfg, targetDate)
+	snapshotsForTimelapse := filterSnapshots(allFiles, cfg, targetDate)
 
 	if len(snapshotsForTimelapse) == 0 {
 		log.Printf("No snapshots available for %s timelapse, skipping.", cfg.Name)
@@ -334,8 +419,17 @@ var GenerateSingleTimelapse = func(timelapseName string) error {
 	}
 
 	if !util.FileExists(finalVideoPath) || util.IsFileEmpty(finalVideoPath) || startIndex == 0 {
-		log.Printf("Initial generation or regeneration for %s timelapse (video missing/empty or tracker invalid).", cfg.Name)
-		err := regenerateFullTimelapse(snapshotsForTimelapse, outputFileName)
+		switch {
+		case !util.FileExists(finalVideoPath):
+			log.Printf("Full regeneration for %s: video file missing.", cfg.Name)
+		case util.IsFileEmpty(finalVideoPath):
+			log.Printf("Full regeneration for %s: video file is empty.", cfg.Name)
+		default:
+			log.Printf("Full regeneration for %s: tracker missing or references a snapshot not in current set (startIndex=0).", cfg.Name)
+		}
+		// Calendar-based timelapses (week/month/year/24-hour) have unique names per period;
+		// no need to archive old copies — just replace in place.
+		err := regenerateFullTimelapse(snapshotsForTimelapse, outputFileName, false)
 		if err != nil {
 			return fmt.Errorf("error generating %s timelapse: %w", cfg.Name, err)
 		}
@@ -396,74 +490,176 @@ var GenerateSingleTimelapse = func(timelapseName string) error {
 	return nil
 }
 
-var filterSnapshots = func(allFiles []string, config models.TimelapseConfig, targetTime time.Time) []string {
-	var filtered []string
-
-	// Determine the start and end of the filtering window
-	var windowStart, windowEnd time.Time
-
-	if strings.HasPrefix(config.Name, "24_hour_") {
-		// For daily 24-hour snapshots, filter for the entire target day
-		windowStart = targetTime.Truncate(24 * time.Hour)
-		windowEnd = windowStart.Add(24 * time.Hour)
-	} else {
-		// For other timelapses, filter backwards from the targetTime for the specified duration
-		windowStart = targetTime.Add(-config.Duration)
-		windowEnd = targetTime
+// parseFileTime parses a timestamp from a snapshot or gallery filename basename.
+// Supports YYYY-MM-DD-HH-MM-SS (snapshot) and YYYY-MM-DD-HH (gallery) formats.
+func parseFileTime(filename string) (time.Time, error) {
+	base := strings.TrimSuffix(filepath.Base(filename), ".jpg")
+	parts := strings.Split(base, "-")
+	switch len(parts) {
+	case 6:
+		return time.Parse("2006-01-02-15-04-05", base)
+	case 4:
+		return time.Parse("2006-01-02-15", base)
+	default:
+		return time.Time{}, fmt.Errorf("unrecognized filename format: %s", filename)
 	}
+}
 
-	// Pre-filter files that are within the duration
-	var recentFiles []string
-	for _, file := range allFiles {
-		// Extract timestamp from filename: snapshots/YYYY-MM/DD/HH/YYYY-MM-DD-HH-MM-SS.jpg
-		parts := strings.Split(strings.TrimSuffix(filepath.Base(file), ".jpg"), "-")
-		if len(parts) != 6 {
-			continue // Invalid filename format
-		}
-		fileTime, err := time.Parse("2006-01-02-15-04-05", strings.Join(parts, "-"))
+// pickClosestToHour returns the file from files whose hour is closest to targetHour.
+func pickClosestToHour(files []string, targetHour int) string {
+	best := files[0]
+	bestDiff := 25
+	for _, f := range files {
+		t, err := parseFileTime(f)
 		if err != nil {
 			continue
 		}
+		diff := t.Hour() - targetHour
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff < bestDiff {
+			bestDiff = diff
+			best = f
+		}
+	}
+	return best
+}
 
-		// Check if the file's timestamp is within the window [windowStart, windowEnd)
+var filterSnapshots = func(allFiles []string, cfg models.TimelapseConfig, targetTime time.Time) []string {
+	var filtered []string
+
+	// Determine window: fixed (calendar) or rolling (legacy/24-hour)
+	var windowStart, windowEnd time.Time
+	if !cfg.WindowStart.IsZero() {
+		windowStart = cfg.WindowStart
+		windowEnd = cfg.WindowEnd
+	} else if strings.HasPrefix(cfg.Name, "24_hour_") {
+		windowStart = targetTime.Truncate(24 * time.Hour)
+		windowEnd = windowStart.Add(24 * time.Hour)
+	} else {
+		windowStart = targetTime.Add(-cfg.Duration)
+		windowEnd = targetTime
+	}
+
+	// Filter to the time window; handle both snapshot (6-part) and gallery (4-part) filenames
+	var recentFiles []string
+	for _, file := range allFiles {
+		fileTime, err := parseFileTime(file)
+		if err != nil {
+			continue
+		}
 		if !fileTime.Before(windowStart) && fileTime.Before(windowEnd) {
 			recentFiles = append(recentFiles, file)
 		}
 	}
 
-	switch config.FramePattern {
+	// Apply daylight-hours filter for all non-24-hour timelapses
+	if !strings.HasPrefix(cfg.Name, "24_hour_") {
+		startHour := config.AppConfig.DaylightStartHour
+		endHour := config.AppConfig.DaylightEndHour
+		if startHour > 0 || endHour < 24 {
+			var daytimeFiles []string
+			for _, file := range recentFiles {
+				t, err := parseFileTime(file)
+				if err != nil {
+					continue
+				}
+				if t.Hour() >= startHour && t.Hour() < endHour {
+					daytimeFiles = append(daytimeFiles, file)
+				}
+			}
+			recentFiles = daytimeFiles
+		}
+	}
+
+	switch cfg.FramePattern {
 	case "all":
 		filtered = recentFiles
+
 	case "hourly":
+		// One file per hour bucket (first encountered in sorted order)
 		var lastHour string
 		for _, file := range recentFiles {
-			fileName := filepath.Base(file)
-			if len(fileName) >= 13 {
-				hourKey := fileName[:13]
+			base := strings.TrimSuffix(filepath.Base(file), ".jpg")
+			if len(base) >= 13 {
+				hourKey := base[:13] // YYYY-MM-DD-HH
 				if hourKey != lastHour {
 					filtered = append(filtered, file)
 					lastHour = hourKey
 				}
 			}
 		}
+
 	case "daily":
-		var lastDay string
+		// One file per day: the image whose hour is closest to DaylightTargetHour (default noon)
+		dayGroups := make(map[string][]string)
+		var dayOrder []string
 		for _, file := range recentFiles {
-			fileName := filepath.Base(file)
-			if len(fileName) >= 10 {
-				dayKey := fileName[:10]
-				if dayKey != lastDay {
-					filtered = append(filtered, file)
-					lastDay = dayKey
+			base := strings.TrimSuffix(filepath.Base(file), ".jpg")
+			if len(base) >= 10 {
+				dayKey := base[:10] // YYYY-MM-DD
+				if _, ok := dayGroups[dayKey]; !ok {
+					dayOrder = append(dayOrder, dayKey)
 				}
+				dayGroups[dayKey] = append(dayGroups[dayKey], file)
+			}
+		}
+		for _, day := range dayOrder {
+			if best := pickClosestToHour(dayGroups[day], config.AppConfig.DaylightTargetHour); best != "" {
+				filtered = append(filtered, best)
+			}
+		}
+
+	default:
+		// Custom N_hourly pattern: one file per N-hour bucket per day
+		if strings.HasSuffix(cfg.FramePattern, "_hourly") {
+			intervalStr := strings.TrimSuffix(cfg.FramePattern, "_hourly")
+			if interval, err := strconv.Atoi(intervalStr); err == nil && interval > 0 {
+				var lastInterval = -1
+				var lastDay string
+				for _, file := range recentFiles {
+					base := strings.TrimSuffix(filepath.Base(file), ".jpg")
+					if len(base) >= 13 {
+						dayKey := base[:10]
+						hourStr := base[11:13]
+						if hour, err := strconv.Atoi(hourStr); err == nil {
+							bucket := hour / interval
+							if dayKey != lastDay || bucket != lastInterval {
+								filtered = append(filtered, file)
+								lastDay = dayKey
+								lastInterval = bucket
+							}
+						}
+					}
+				}
+				break
+			}
+		}
+		// Fallback: one noon-closest image per day
+		dayGroups := make(map[string][]string)
+		var dayOrder []string
+		for _, file := range recentFiles {
+			base := strings.TrimSuffix(filepath.Base(file), ".jpg")
+			if len(base) >= 10 {
+				dayKey := base[:10]
+				if _, ok := dayGroups[dayKey]; !ok {
+					dayOrder = append(dayOrder, dayKey)
+				}
+				dayGroups[dayKey] = append(dayGroups[dayKey], file)
+			}
+		}
+		for _, day := range dayOrder {
+			if best := pickClosestToHour(dayGroups[day], config.AppConfig.DaylightTargetHour); best != "" {
+				filtered = append(filtered, best)
 			}
 		}
 	}
 
-	sort.Strings(filtered) // Ensure chronological order
+	sort.Strings(filtered)
 	return filtered
 }
-var regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string) error {
+var regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string, archive bool) error {
 	if len(snapshotFiles) == 0 {
 		log.Println("No snapshots to generate timelapse.")
 		return nil
@@ -472,79 +668,91 @@ var regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string
 	tempVideoPath := filepath.Join(config.AppConfig.DataDir, "temp_"+outputFileName)
 	finalVideoPath := filepath.Join(config.AppConfig.DataDir, outputFileName)
 
-	// Find the first valid snapshot to create the initial video.
-	var firstValidSnapshotIndex = -1
+	// Validate files with a fast stat check — no FFmpeg call per frame.
 	var validSnapshots []string
-	log.Println("Validating snapshots for full timelapse regeneration...")
-	for i, snapshot := range snapshotFiles {
-		// Use a dummy segment path to test the snapshot
-		dummySegmentPath := filepath.Join(config.AppConfig.DataDir, "validation_segment.webm")
-		err := createVideoSegment(snapshot, dummySegmentPath)
-		if err != nil {
-			log.Printf("ERROR: Failed to process snapshot %s: %v. Moving to quarantine.", snapshot, err)
-			quarantineDir := filepath.Join(config.AppConfig.DataDir, "quarantine")
-			if err := os.MkdirAll(quarantineDir, 0755); err != nil {
-				log.Printf("ERROR: Failed to create quarantine directory: %v", err)
-			} else {
-				destPath := filepath.Join(quarantineDir, filepath.Base(snapshot))
-				if err := os.Rename(snapshot, destPath); err != nil {
-					log.Printf("ERROR: Failed to move corrupt snapshot %s to quarantine: %v", snapshot, err)
-				}
+	for _, snapshot := range snapshotFiles {
+		info, err := os.Stat(snapshot)
+		if err != nil || info.Size() == 0 {
+			log.Printf("Skipping missing or empty snapshot: %s", snapshot)
+			continue
+		}
+		validSnapshots = append(validSnapshots, snapshot)
+	}
+	if len(validSnapshots) == 0 {
+		log.Printf("No valid snapshots found to generate timelapse %s.", outputFileName)
+		return nil
+	}
+
+	// Write an ffconcat list so FFmpeg processes all frames in a single pass instead
+	// of one FFmpeg invocation per frame (which was causing extreme CPU usage on large sets).
+	concatListPath := filepath.Join(config.AppConfig.DataDir, "regen_concat_list.txt")
+	listFile, err := os.Create(concatListPath)
+	if err != nil {
+		return fmt.Errorf("failed to create concat list: %w", err)
+	}
+	fmt.Fprintln(listFile, "ffconcat version 1.0")
+	for _, snapshot := range validSnapshots {
+		// duration 0.0333 ≈ 30 fps
+		fmt.Fprintf(listFile, "file '%s'\nduration 0.0333\n", filepath.ToSlash(snapshot))
+	}
+	// ffconcat requires the last entry to be repeated without a duration to avoid a missing final frame.
+	fmt.Fprintf(listFile, "file '%s'\n", filepath.ToSlash(validSnapshots[len(validSnapshots)-1]))
+	listFile.Close()
+	defer os.Remove(concatListPath)
+
+	log.Printf("Starting batch timelapse generation for %s (%d frames)...", outputFileName, len(validSnapshots))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+	defer cancel()
+
+	videoFilter := "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p"
+	var cmd *exec.Cmd
+	if PreferredVideoCodec == "libsvtav1" {
+		cmd = exec.CommandContext(ctx, "ffmpeg",
+			"-hide_banner", "-loglevel", "error",
+			"-f", "concat", "-safe", "0", "-i", concatListPath,
+			"-vf", videoFilter,
+			"-c:v", PreferredVideoCodec, "-preset", "10",
+			"-threads", fmt.Sprintf("%d", ffmpegThreads),
+			"-crf", config.AppConfig.GetCRFValue(),
+			"-an", "-f", "webm", "-y", tempVideoPath,
+		)
+	} else {
+		cmd = exec.CommandContext(ctx, "ffmpeg",
+			"-hide_banner", "-loglevel", "error",
+			"-f", "concat", "-safe", "0", "-i", concatListPath,
+			"-vf", videoFilter,
+			"-c:v", PreferredVideoCodec,
+			"-threads", fmt.Sprintf("%d", ffmpegThreads),
+			"-crf", config.AppConfig.GetCRFValue(),
+			"-an", "-f", "webm", "-y", tempVideoPath,
+		)
+	}
+	cmd.Dir = config.AppConfig.DataDir
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		os.Remove(tempVideoPath)
+		logFile, logErr := os.OpenFile(config.GetFFmpegLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if logErr == nil {
+			logFile.WriteString(fmt.Sprintf("--- FFmpeg Batch Error for %s: %s ---\n%s\n", outputFileName, time.Now(), stderr.String()))
+			logFile.Close()
+		}
+		return fmt.Errorf("ffmpeg batch encode failed for %s: %w", outputFileName, err)
+	}
+
+	// Replace the old video; archive only if requested (legacy rolling-window timelapses).
+	if util.FileExists(finalVideoPath) {
+		if archive {
+			archiveFileName := fmt.Sprintf("%s_%s.webm", strings.TrimSuffix(outputFileName, ".webm"), time.Now().Format("20060102_150405"))
+			archiveVideoPath := filepath.Join(config.AppConfig.DataDir, archiveFileName)
+			log.Printf("Archiving existing video to: %s", archiveVideoPath)
+			if err := os.Rename(finalVideoPath, archiveVideoPath); err != nil {
+				log.Printf("Warning: failed to archive video %s: %v", finalVideoPath, err)
 			}
 		} else {
-			if firstValidSnapshotIndex == -1 {
-				firstValidSnapshotIndex = i
-				// Move the first valid segment to be the start of the temp video
-				if err := os.Rename(dummySegmentPath, tempVideoPath); err != nil {
-					// cleanup dummy file if rename fails
-					os.Remove(dummySegmentPath)
-					return fmt.Errorf("failed to rename initial segment: %w", err)
-				}
-			} else {
-				// Clean up the dummy segment, not needed for subsequent files
-				os.Remove(dummySegmentPath)
-			}
-			validSnapshots = append(validSnapshots, snapshot)
-		}
-	}
-
-	if firstValidSnapshotIndex == -1 {
-		log.Printf("No valid snapshots found to generate timelapse %s.", outputFileName)
-		return nil // Nothing to do
-	}
-
-	log.Printf("Starting full regeneration with %d valid snapshots.", len(validSnapshots))
-	// Sequentially append the rest of the valid snapshots
-	for i := 1; i < len(validSnapshots); i++ {
-		snapshot := validSnapshots[i]
-		segmentPath := filepath.Join(config.AppConfig.DataDir, "temp_segment_for_full_regen.webm")
-		concatOutputPath := filepath.Join(config.AppConfig.DataDir, "temp_concat_output_for_full_regen.webm")
-
-		if err := createVideoSegment(snapshot, segmentPath); err != nil {
-			// This should theoretically not happen due to pre-validation, but handle it just in case.
-			log.Printf("ERROR during sequential append for %s: %v. Skipping.", snapshot, err)
-			continue
-		}
-
-		if err := concatenateVideos(tempVideoPath, segmentPath, concatOutputPath); err != nil {
-			log.Printf("ERROR concatenating videos during full regeneration: %v. Skipping segment.", err)
-			os.Remove(segmentPath)
-			continue
-		}
-		os.Remove(segmentPath)
-
-		if err := os.Rename(concatOutputPath, tempVideoPath); err != nil {
-			return fmt.Errorf("failed to rename concatenated video during full regeneration: %w", err)
-		}
-	}
-
-	// Atomically replace the old video with the new one
-	if util.FileExists(finalVideoPath) {
-		archiveFileName := fmt.Sprintf("%s_%s.webm", strings.TrimSuffix(outputFileName, ".webm"), time.Now().Format("20060102_150405"))
-		archiveVideoPath := filepath.Join(config.AppConfig.DataDir, archiveFileName)
-		log.Printf("Archiving existing video to: %s", archiveVideoPath)
-		if err := os.Rename(finalVideoPath, archiveVideoPath); err != nil {
-			log.Printf("Warning: failed to archive video %s: %v", finalVideoPath, err)
+			os.Remove(finalVideoPath)
 		}
 	}
 
@@ -552,8 +760,8 @@ var regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string
 		return fmt.Errorf("failed to rename temp video to final video: %w", err)
 	}
 
-	time.Sleep(100 * time.Millisecond) // Give OS time to update file metadata
-	log.Printf("Successfully completed full timelapse regeneration for %s.", outputFileName)
+	time.Sleep(100 * time.Millisecond)
+	log.Printf("Successfully completed batch timelapse generation for %s (%d frames).", outputFileName, len(validSnapshots))
 	return nil
 }
 
@@ -612,83 +820,158 @@ var CleanupSnapshots = func() {
 	log.Printf("Snapshot cleanup finished. Kept %d files, removed %d old files, and removed %d corrupt (zero-byte) files.", filesKept, filesToDelete, corruptFiles)
 }
 
-// This function is now called from GenerateSingleTimelapse
+// cleanVideosByCount keeps only the newest `keep` files matching prefix+".webm" in DataDir.
+// cleanVideosByCount removes the oldest videos for a given prefix, keeping only the N newest.
+// Use only for timelapses without a natural date in the filename (e.g. yearly).
+func cleanVideosByCount(prefix string, keep int) {
+	files, err := os.ReadDir(config.AppConfig.DataDir)
+	if err != nil {
+		log.Printf("Error reading data directory during video cleanup: %v", err)
+		return
+	}
+	var matches []string
+	for _, f := range files {
+		if strings.HasPrefix(f.Name(), prefix) && strings.HasSuffix(f.Name(), ".webm") {
+			matches = append(matches, f.Name())
+		}
+	}
+	sort.Strings(matches) // chronological because date is in the name
+	if len(matches) <= keep {
+		return
+	}
+	toDelete := matches[:len(matches)-keep]
+	for _, name := range toDelete {
+		if err := os.Remove(filepath.Join(config.AppConfig.DataDir, name)); err != nil {
+			log.Printf("Error removing old video %s: %v", name, err)
+		}
+	}
+	log.Printf("Cleaned up %d old video(s) with prefix %q.", len(toDelete), prefix)
+}
+
+// cleanWeeklyVideos deletes weekly timelapse files whose Monday date is older than the
+// retention window. This is date-based rather than count-based so that in-window videos
+// are never deleted, preventing the rebuild-then-delete loop that count-based cleanup caused.
+func cleanWeeklyVideos() {
+	now := time.Now()
+	keepWeeks := config.AppConfig.WeeklyLapsesToKeep
+	if keepWeeks < 1 {
+		keepWeeks = 1
+	}
+	currentMonday := calendarWeekMonday(now)
+	oldestAllowed := currentMonday.AddDate(0, 0, -7*(keepWeeks-1))
+
+	files, err := os.ReadDir(config.AppConfig.DataDir)
+	if err != nil {
+		log.Printf("Error reading data directory during weekly video cleanup: %v", err)
+		return
+	}
+	deleted := 0
+	for _, f := range files {
+		name := f.Name()
+		if !strings.HasPrefix(name, "timelapse_week_") || !strings.HasSuffix(name, ".webm") {
+			continue
+		}
+		dateStr := name[len("timelapse_week_") : len("timelapse_week_")+10]
+		monday, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			continue
+		}
+		if monday.Before(oldestAllowed) {
+			if err := os.Remove(filepath.Join(config.AppConfig.DataDir, name)); err != nil {
+				log.Printf("Error removing old weekly video %s: %v", name, err)
+			} else {
+				deleted++
+			}
+		}
+	}
+	if deleted > 0 {
+		log.Printf("Cleaned up %d old weekly timelapse video(s) older than %s.", deleted, oldestAllowed.Format("2006-01-02"))
+	}
+}
+
+// cleanMonthlyVideos deletes monthly timelapse files whose month is older than the retention window.
+func cleanMonthlyVideos() {
+	now := time.Now()
+	keepMonths := config.AppConfig.MonthlyLapsesToKeep
+	if keepMonths < 1 {
+		keepMonths = 1
+	}
+	oldestAllowedYear := now.Year()
+	oldestAllowedMonth := now.Month() - time.Month(keepMonths-1)
+	for oldestAllowedMonth <= 0 {
+		oldestAllowedMonth += 12
+		oldestAllowedYear--
+	}
+	oldestAllowed := time.Date(oldestAllowedYear, oldestAllowedMonth, 1, 0, 0, 0, 0, now.Location())
+
+	files, err := os.ReadDir(config.AppConfig.DataDir)
+	if err != nil {
+		log.Printf("Error reading data directory during monthly video cleanup: %v", err)
+		return
+	}
+	deleted := 0
+	for _, f := range files {
+		name := f.Name()
+		if !strings.HasPrefix(name, "timelapse_month_") || !strings.HasSuffix(name, ".webm") {
+			continue
+		}
+		dateStr := name[len("timelapse_month_") : len("timelapse_month_")+7]
+		monthStart, err := time.Parse("2006-01", dateStr)
+		if err != nil {
+			continue
+		}
+		if monthStart.Before(oldestAllowed) {
+			if err := os.Remove(filepath.Join(config.AppConfig.DataDir, name)); err != nil {
+				log.Printf("Error removing old monthly video %s: %v", name, err)
+			} else {
+				deleted++
+			}
+		}
+	}
+	if deleted > 0 {
+		log.Printf("Cleaned up %d old monthly timelapse video(s) older than %s.", deleted, oldestAllowed.Format("2006-01"))
+	}
+}
+
 var CleanOldVideos = func() {
 	log.Printf("Starting video cleanup...")
 
-	// Clean up dynamically generated daily 24-hour timelapses
-	log.Printf("Cleaning up daily 24-hour timelapses (retaining last %d days)...", config.AppConfig.DaysOf24HourSnapshots)
+	// Daily 24-hour timelapses: remove by cutoff date
+	cutoffDate := time.Now().AddDate(0, 0, -config.AppConfig.DaysOf24HourSnapshots).Truncate(24 * time.Hour)
 	files, err := os.ReadDir(config.AppConfig.DataDir)
 	if err != nil {
 		log.Printf("Error reading data directory for daily video cleanup: %v", err)
 		return
 	}
-
-	// Calculate the cutoff date for daily videos
-	cutoffDate := time.Now().AddDate(0, 0, -config.AppConfig.DaysOf24HourSnapshots).Truncate(24 * time.Hour)
-	dailyVideosRemoved := 0
-
-	for _, file := range files {
-		fileName := file.Name()
-		if strings.HasPrefix(fileName, "timelapse_24_hour_") && strings.HasSuffix(fileName, ".webm") {
-			// Extract date from filename: timelapse_24_hour_YYYY-MM-DD.webm
-			dateStr := fileName[len("timelapse_24_hour_") : len("timelapse_24_hour_")+10] // "YYYY-MM-DD"
+	dailyRemoved := 0
+	for _, f := range files {
+		name := f.Name()
+		if strings.HasPrefix(name, "timelapse_24_hour_") && strings.HasSuffix(name, ".webm") {
+			dateStr := name[len("timelapse_24_hour_") : len("timelapse_24_hour_")+10]
 			fileDate, err := time.Parse("2006-01-02", dateStr)
 			if err != nil {
-				log.Printf("Warning: could not parse date from daily timelapse video %s: %v", fileName, err)
+				log.Printf("Warning: could not parse date from daily timelapse video %s: %v", name, err)
 				continue
 			}
-
-			// If the video's date is before the cutoff date, delete it
 			if fileDate.Before(cutoffDate) {
-				filePath := filepath.Join(config.AppConfig.DataDir, fileName)
-				if err := os.Remove(filePath); err != nil {
-					log.Printf("Error removing old daily timelapse video %s: %v", fileName, err)
+				if err := os.Remove(filepath.Join(config.AppConfig.DataDir, name)); err != nil {
+					log.Printf("Error removing old daily timelapse video %s: %v", name, err)
 				} else {
-					dailyVideosRemoved++
+					dailyRemoved++
 				}
 			}
 		}
 	}
-	log.Printf("Finished cleaning up daily 24-hour timelapses. Removed %d old daily videos.", dailyVideosRemoved)
+	log.Printf("Removed %d old daily 24-hour timelapse video(s).", dailyRemoved)
 
-	// Clean up other pre-defined timelapses (1_week, 1_month, 1_year)
-	log.Printf("Cleaning up other timelapses (retaining up to %d archives of each type)...", config.AppConfig.VideoArchivesToKeep)
-	for _, cfg := range models.TimelapseConfigsData {
-		prefix := fmt.Sprintf("timelapse_%s_", cfg.Name) // This prefix will correctly match
-		files, err := os.ReadDir(config.AppConfig.DataDir)
-		if err != nil {
-			log.Printf("Error reading data directory for video cleanup: %v", err)
-			continue
-		}
+	// Weekly timelapses: date-based — never deletes in-window videos
+	cleanWeeklyVideos()
 
-		var videoArchives []string
-		for _, file := range files {
-			if strings.HasPrefix(file.Name(), prefix) && strings.HasSuffix(file.Name(), ".webm") {
-				videoArchives = append(videoArchives, file.Name())
-			}
-		}
+	// Monthly timelapses: date-based — never deletes in-window videos
+	cleanMonthlyVideos()
 
-		if len(videoArchives) <= config.AppConfig.VideoArchivesToKeep {
-			continue
-		}
-
-		sort.Strings(videoArchives)
-
-		filesToDeleteCount := len(videoArchives) - config.AppConfig.VideoArchivesToKeep
-		filesToDelete := videoArchives[:filesToDeleteCount]
-		removedCount := 0
-
-		for _, fileName := range filesToDelete {
-			filePath := filepath.Join(config.AppConfig.DataDir, fileName)
-			if err := os.Remove(filePath); err != nil {
-				log.Printf("Error removing old video archive %s: %v", fileName, err)
-			} else {
-				removedCount++
-			}
-		}
-		log.Printf("Finished cleanup for %s. Removed %d archive(s).", cfg.Name, removedCount)
-	}
+	// Yearly timelapses: keep current + previous year
+	cleanVideosByCount("timelapse_year_", 2)
 }
 
 var CleanupGallery = func() {
@@ -764,4 +1047,4 @@ var CleanupLogFiles = func() {
 	} else {
 		log.Println("No old log files to clean up.")
 	}
-}		
+}
