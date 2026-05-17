@@ -90,7 +90,7 @@ var createVideoSegment = func(imagePath, segmentPath string) error {
 			"-t", "0.0333", // 1 frame at 30fps
 			"-vf", videoFilter,
 			"-c:v", PreferredVideoCodec,
-			"-preset", "8",
+			"-preset", "10",
 			"-threads", fmt.Sprintf("%d", ffmpegThreads),
 			"-g", "1", // Force Intra frame
 			"-keyint_min", "1",
@@ -315,6 +315,17 @@ var GenerateSingleTimelapse = func(timelapseName string) error {
 		if err != nil {
 			return fmt.Errorf("invalid date format in timelapse name %s: %w", timelapseName, err)
 		}
+		// Skip if outside the active retention window — stale queue jobs can reference old weeks.
+		currentMonday := calendarWeekMonday(time.Now())
+		keepWeeks := config.AppConfig.WeeklyLapsesToKeep
+		if keepWeeks < 1 {
+			keepWeeks = 1
+		}
+		oldestAllowedWeek := currentMonday.AddDate(0, 0, -7*(keepWeeks-1))
+		if monday.Before(oldestAllowedWeek) {
+			log.Printf("Skipping %s: outside retention window (oldest allowed: %s).", timelapseName, oldestAllowedWeek.Format("2006-01-02"))
+			return nil
+		}
 		cfg = models.TimelapseConfig{
 			Name:         timelapseName,
 			FramePattern: "hourly",
@@ -329,6 +340,17 @@ var GenerateSingleTimelapse = func(timelapseName string) error {
 		monthStart, err := time.Parse("2006-01", monthStr)
 		if err != nil {
 			return fmt.Errorf("invalid month format in timelapse name %s: %w", timelapseName, err)
+		}
+		// Skip if outside the active retention window.
+		now := time.Now()
+		keepMonths := config.AppConfig.MonthlyLapsesToKeep
+		if keepMonths < 1 {
+			keepMonths = 1
+		}
+		oldestAllowedMonth := time.Date(now.Year(), now.Month()-time.Month(keepMonths-1), 1, 0, 0, 0, 0, now.Location())
+		if monthStart.Before(oldestAllowedMonth) {
+			log.Printf("Skipping %s: outside retention window (oldest allowed: %s).", timelapseName, oldestAllowedMonth.Format("2006-01"))
+			return nil
 		}
 		nextMonth := time.Date(monthStart.Year(), monthStart.Month()+1, 1, 0, 0, 0, 0, monthStart.Location())
 		cfg = models.TimelapseConfig{
@@ -397,7 +419,14 @@ var GenerateSingleTimelapse = func(timelapseName string) error {
 	}
 
 	if !util.FileExists(finalVideoPath) || util.IsFileEmpty(finalVideoPath) || startIndex == 0 {
-		log.Printf("Initial generation or regeneration for %s timelapse (video missing/empty or tracker invalid).", cfg.Name)
+		switch {
+		case !util.FileExists(finalVideoPath):
+			log.Printf("Full regeneration for %s: video file missing.", cfg.Name)
+		case util.IsFileEmpty(finalVideoPath):
+			log.Printf("Full regeneration for %s: video file is empty.", cfg.Name)
+		default:
+			log.Printf("Full regeneration for %s: tracker missing or references a snapshot not in current set (startIndex=0).", cfg.Name)
+		}
 		// Calendar-based timelapses (week/month/year/24-hour) have unique names per period;
 		// no need to archive old copies — just replace in place.
 		err := regenerateFullTimelapse(snapshotsForTimelapse, outputFileName, false)
@@ -683,7 +712,7 @@ var regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string
 			"-hide_banner", "-loglevel", "error",
 			"-f", "concat", "-safe", "0", "-i", concatListPath,
 			"-vf", videoFilter,
-			"-c:v", PreferredVideoCodec, "-preset", "8",
+			"-c:v", PreferredVideoCodec, "-preset", "10",
 			"-threads", fmt.Sprintf("%d", ffmpegThreads),
 			"-crf", config.AppConfig.GetCRFValue(),
 			"-an", "-f", "webm", "-y", tempVideoPath,
@@ -792,6 +821,8 @@ var CleanupSnapshots = func() {
 }
 
 // cleanVideosByCount keeps only the newest `keep` files matching prefix+".webm" in DataDir.
+// cleanVideosByCount removes the oldest videos for a given prefix, keeping only the N newest.
+// Use only for timelapses without a natural date in the filename (e.g. yearly).
 func cleanVideosByCount(prefix string, keep int) {
 	files, err := os.ReadDir(config.AppConfig.DataDir)
 	if err != nil {
@@ -815,6 +846,91 @@ func cleanVideosByCount(prefix string, keep int) {
 		}
 	}
 	log.Printf("Cleaned up %d old video(s) with prefix %q.", len(toDelete), prefix)
+}
+
+// cleanWeeklyVideos deletes weekly timelapse files whose Monday date is older than the
+// retention window. This is date-based rather than count-based so that in-window videos
+// are never deleted, preventing the rebuild-then-delete loop that count-based cleanup caused.
+func cleanWeeklyVideos() {
+	now := time.Now()
+	keepWeeks := config.AppConfig.WeeklyLapsesToKeep
+	if keepWeeks < 1 {
+		keepWeeks = 1
+	}
+	currentMonday := calendarWeekMonday(now)
+	oldestAllowed := currentMonday.AddDate(0, 0, -7*(keepWeeks-1))
+
+	files, err := os.ReadDir(config.AppConfig.DataDir)
+	if err != nil {
+		log.Printf("Error reading data directory during weekly video cleanup: %v", err)
+		return
+	}
+	deleted := 0
+	for _, f := range files {
+		name := f.Name()
+		if !strings.HasPrefix(name, "timelapse_week_") || !strings.HasSuffix(name, ".webm") {
+			continue
+		}
+		dateStr := name[len("timelapse_week_") : len("timelapse_week_")+10]
+		monday, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			continue
+		}
+		if monday.Before(oldestAllowed) {
+			if err := os.Remove(filepath.Join(config.AppConfig.DataDir, name)); err != nil {
+				log.Printf("Error removing old weekly video %s: %v", name, err)
+			} else {
+				deleted++
+			}
+		}
+	}
+	if deleted > 0 {
+		log.Printf("Cleaned up %d old weekly timelapse video(s) older than %s.", deleted, oldestAllowed.Format("2006-01-02"))
+	}
+}
+
+// cleanMonthlyVideos deletes monthly timelapse files whose month is older than the retention window.
+func cleanMonthlyVideos() {
+	now := time.Now()
+	keepMonths := config.AppConfig.MonthlyLapsesToKeep
+	if keepMonths < 1 {
+		keepMonths = 1
+	}
+	oldestAllowedYear := now.Year()
+	oldestAllowedMonth := now.Month() - time.Month(keepMonths-1)
+	for oldestAllowedMonth <= 0 {
+		oldestAllowedMonth += 12
+		oldestAllowedYear--
+	}
+	oldestAllowed := time.Date(oldestAllowedYear, oldestAllowedMonth, 1, 0, 0, 0, 0, now.Location())
+
+	files, err := os.ReadDir(config.AppConfig.DataDir)
+	if err != nil {
+		log.Printf("Error reading data directory during monthly video cleanup: %v", err)
+		return
+	}
+	deleted := 0
+	for _, f := range files {
+		name := f.Name()
+		if !strings.HasPrefix(name, "timelapse_month_") || !strings.HasSuffix(name, ".webm") {
+			continue
+		}
+		dateStr := name[len("timelapse_month_") : len("timelapse_month_")+7]
+		monthStart, err := time.Parse("2006-01", dateStr)
+		if err != nil {
+			continue
+		}
+		if monthStart.Before(oldestAllowed) {
+			if err := os.Remove(filepath.Join(config.AppConfig.DataDir, name)); err != nil {
+				log.Printf("Error removing old monthly video %s: %v", name, err)
+			} else {
+				deleted++
+			}
+		}
+	}
+	if deleted > 0 {
+		log.Printf("Cleaned up %d old monthly timelapse video(s) older than %s.", deleted, oldestAllowed.Format("2006-01"))
+	}
 }
 
 var CleanOldVideos = func() {
@@ -848,13 +964,13 @@ var CleanOldVideos = func() {
 	}
 	log.Printf("Removed %d old daily 24-hour timelapse video(s).", dailyRemoved)
 
-	// Calendar-week timelapses: keep WeeklyLapsesToKeep newest
-	cleanVideosByCount("timelapse_week_", config.AppConfig.WeeklyLapsesToKeep)
+	// Weekly timelapses: date-based — never deletes in-window videos
+	cleanWeeklyVideos()
 
-	// Calendar-month timelapses: keep MonthlyLapsesToKeep newest
-	cleanVideosByCount("timelapse_month_", config.AppConfig.MonthlyLapsesToKeep)
+	// Monthly timelapses: date-based — never deletes in-window videos
+	cleanMonthlyVideos()
 
-	// Yearly timelapses: keep 2 (current + previous year)
+	// Yearly timelapses: keep current + previous year
 	cleanVideosByCount("timelapse_year_", 2)
 }
 

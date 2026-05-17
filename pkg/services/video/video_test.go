@@ -678,6 +678,8 @@ func setupCalendarTest(t *testing.T) (string, func()) {
 	config.AppConfig.DaylightStartHour = 7
 	config.AppConfig.DaylightEndHour = 19
 	config.AppConfig.DaylightTargetHour = 12
+	config.AppConfig.WeeklyLapsesToKeep = 4
+	config.AppConfig.MonthlyLapsesToKeep = 3
 	os.MkdirAll(config.AppConfig.SnapshotsDir, 0755)
 	os.MkdirAll(config.AppConfig.GalleryDir, 0755)
 
