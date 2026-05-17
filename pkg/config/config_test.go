@@ -3,19 +3,12 @@ package config
 import (
 	"encoding/base64"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGetFFmpegLogPath(t *testing.T) {
-	AppConfig.DataDir = "/tmp"
-	expectedLogPath := filepath.Join("/tmp", "ffmpeg_log_"+time.Now().Format("2006-01-02")+".txt")
-	assert.Equal(t, expectedLogPath, GetFFmpegLogPath())
-}
 
 func TestGetCRFValue(t *testing.T) {
 	c := &Config{}

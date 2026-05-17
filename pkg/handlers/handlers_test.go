@@ -140,7 +140,7 @@ func TestHandleDailyGallery(t *testing.T) {
 
 func TestHandleLog(t *testing.T) {
 	r := setupTestApp(t)
-	os.WriteFile(filepath.Join(config.AppConfig.DataDir, "ffmpeg_log_2023-01-01.txt"), []byte("log content"), 0644)
+	database.AppendFFmpegLog("2023-01-01", "", "log content")
 	r.GET("/log", func(c *gin.Context) {
 		c.Set("user", &models.User{Username: "test"})
 		HandleLog(c)
@@ -156,7 +156,7 @@ func TestHandleLog(t *testing.T) {
 func TestHandleLogStream(t *testing.T) {
 	r := setupTestApp(t)
 	logContent := "line 1\nline 2\nline 3"
-	os.WriteFile(filepath.Join(config.AppConfig.DataDir, "ffmpeg_log_2023-01-01.txt"), []byte(logContent), 0644)
+	database.AppendFFmpegLog("2023-01-01", "", logContent)
 	r.GET("/log/stream", HandleLogStream)
 
 	// Test successful stream
@@ -165,7 +165,8 @@ func TestHandleLogStream(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, logContent, w.Body.String())
+	// GetFFmpegLogContent appends a trailing newline when content doesn't end with one
+	assert.Equal(t, logContent+"\n", w.Body.String())
 
 	// Test missing date parameter
 	req, _ = http.NewRequest("GET", "/log/stream", nil)

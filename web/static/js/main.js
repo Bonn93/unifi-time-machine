@@ -1,6 +1,19 @@
 // Go variables passed to JS are expected to be defined in the HTML template.
 document.addEventListener('DOMContentLoaded', () => {
 
+    // --- Plyr video player instances ---
+    // preload="none" on each <video> prevents all 4 players from fetching on page load.
+    // Plyr wraps the native element and adds buffer visibility + stall recovery UI.
+    const plyrInstances = new Map();
+    ['Daily', 'Weekly', 'Monthly', 'Yearly'].forEach(type => {
+        const el = document.getElementById(`video-${type}`);
+        if (el) {
+            plyrInstances.set(type, new Plyr(el, {
+                controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'fullscreen'],
+            }));
+        }
+    });
+
     // --- New Dashboard Stats Polling ---
     const elements = {
         osType: document.getElementById('os-type'),
@@ -72,17 +85,21 @@ document.addEventListener('DOMContentLoaded', () => {
             const videoPlayerId = event.target.dataset.videoTarget;
             const downloadButtonId = event.target.dataset.downloadTarget;
 
-            const videoPlayer = document.getElementById(videoPlayerId);
-            const downloadButton = document.getElementById(downloadButtonId);
-            const shareButton = event.target.closest('.card-body').querySelector('.share-btn');
-
-            if (videoPlayer) {
-                videoPlayer.src = newSource;
-                videoPlayer.load();
+            // "video-Daily" → "Daily"
+            const typeName = videoPlayerId.replace('video-', '');
+            const plyrInstance = plyrInstances.get(typeName);
+            if (plyrInstance) {
+                plyrInstance.source = {
+                    type: 'video',
+                    sources: [{ src: newSource, type: 'video/webm' }],
+                };
             }
+
+            const downloadButton = document.getElementById(downloadButtonId);
             if (downloadButton) {
                 downloadButton.href = newSource;
             }
+            const shareButton = event.target.closest('.card-body').querySelector('.share-btn');
             if (shareButton) {
                 shareButton.dataset.path = newSource;
             }

@@ -2,13 +2,11 @@ package config
 
 import (
 	"encoding/base64"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Config holds the application configuration.
@@ -37,22 +35,11 @@ type Config struct {
 	DaylightTargetHour    int // target hour for "daily" frame selection (closest-to-noon picker)
 	WeeklyLapsesToKeep    int // number of calendar-week timelapses to retain
 	MonthlyLapsesToKeep   int // number of calendar-month timelapses to retain
+	MaxBitrate            string
 }
 
 // AppConfig is the global application configuration.
 var AppConfig Config
-
-// GetFFmpegLogPath returns the path to the ffmpeg log file for the current day.
-
-func GetFFmpegLogPath() string {
-
-	today := time.Now().Format("2006-01-02")
-
-	logFileName := fmt.Sprintf("ffmpeg_log_%s.txt", today)
-
-	return filepath.Join(AppConfig.DataDir, logFileName)
-
-}
 
 // GetCRFValue returns the CRF value based on the configured video quality.
 
@@ -124,6 +111,7 @@ func LoadConfig() {
 		DaylightTargetHour:  getEnvAsInt("DAYLIGHT_TARGET_HOUR", 12),
 		WeeklyLapsesToKeep:  getEnvAsInt("WEEKLY_LAPSES_TO_KEEP", 4),
 		MonthlyLapsesToKeep: getEnvAsInt("MONTHLY_LAPSES_TO_KEEP", 3),
+		MaxBitrate:          getEnv("VIDEO_MAX_BITRATE", "2M"),
 	}
 
 	// Validate APP_KEY
@@ -173,7 +161,7 @@ func LoadConfig() {
 	log.Printf("Data Directory: %s", AppConfig.DataDir)
 	log.Printf("Snapshot Interval: %d seconds", AppConfig.SnapshotIntervalSec)
 	log.Printf("Video Cron Interval: %d seconds", AppConfig.VideoCronIntervalSec)
-	log.Printf("Video Quality: %s", AppConfig.VideoQuality)
+	log.Printf("Video Quality: %s (max bitrate: %s)", AppConfig.VideoQuality, AppConfig.MaxBitrate)
 	log.Printf("High Quality Snapshots: %s", AppConfig.HQSnapParams)
 	log.Printf("Days of 24-Hour Timelapses: %d", AppConfig.DaysOf24HourSnapshots)
 	log.Printf("Snapshot Retention Days: %d", AppConfig.SnapshotRetentionDays)

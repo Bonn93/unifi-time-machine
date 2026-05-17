@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"fmt"
-	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -164,41 +162,30 @@ func HandleDashboard(c *gin.Context) {
 }
 
 func HandleLog(c *gin.Context) {
-	logFiles, err := filepath.Glob(filepath.Join(config.AppConfig.DataDir, "ffmpeg_log_*.txt"))
+	dates, err := database.GetFFmpegLogDates()
 	if err != nil {
-		c.String(http.StatusInternalServerError, "Error finding log files: %v", err)
+		c.String(http.StatusInternalServerError, "Error fetching log dates: %v", err)
 		return
 	}
 
-	if len(logFiles) == 0 {
+	if len(dates) == 0 {
 		c.HTML(http.StatusOK, "log.html", gin.H{
 			"Message": "No log files found.",
 		})
 		return
 	}
 
-	// Sort files by name to get the most recent one last
-	sort.Sort(sort.Reverse(sort.StringSlice(logFiles)))
-
 	var logDates []map[string]string
-	var firstDate string
-	for i, file := range logFiles {
-		// Extract YYYY-MM-DD from the filename
-		name := filepath.Base(file)
-		dateStr := strings.TrimSuffix(strings.TrimPrefix(name, "ffmpeg_log_"), ".txt")
-		if i == 0 {
-			firstDate = dateStr
-		}
+	for _, dateStr := range dates {
 		logDates = append(logDates, map[string]string{
 			"value":   dateStr,
 			"display": util.FormatDateForDisplay(dateStr),
 		})
 	}
 
-	// Determine which log to display
 	selectedDate := c.Query("date")
 	if selectedDate == "" {
-		selectedDate = firstDate
+		selectedDate = dates[0] // already sorted DESC
 	}
 	selectedDateDisplay := util.FormatDateForDisplay(selectedDate)
 
@@ -218,25 +205,18 @@ func HandleLogStream(c *gin.Context) {
 		return
 	}
 
-	logPath := filepath.Join(config.AppConfig.DataDir, fmt.Sprintf("ffmpeg_log_%s.txt", selectedDate))
-	if !util.FileExists(logPath) {
-		c.String(http.StatusNotFound, "Log file not found.")
-		return
-	}
-
-	file, err := os.Open(logPath)
+	content, err := database.GetFFmpegLogContent(selectedDate)
 	if err != nil {
-		c.String(http.StatusInternalServerError, "Error opening log file.")
+		c.String(http.StatusInternalServerError, "Error fetching log content.")
 		return
 	}
-	defer file.Close()
+	if content == "" {
+		c.String(http.StatusNotFound, "No log entries found for this date.")
+		return
+	}
 
 	c.Header("Content-Type", "text/plain; charset=utf-8")
-	_, err = io.Copy(c.Writer, file)
-	if err != nil {
-		c.String(http.StatusInternalServerError, "Error streaming log file.")
-		return
-	}
+	c.String(http.StatusOK, "%s", content)
 }
 
 func HandleSystemStatsJSON(c *gin.Context) {

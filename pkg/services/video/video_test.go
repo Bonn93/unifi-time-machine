@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"time-machine/pkg/config"
+	"time-machine/pkg/database"
 	"time-machine/pkg/jobs"
 	"time-machine/pkg/models"
 	"time-machine/pkg/util"
@@ -25,6 +26,7 @@ func setupTest(t *testing.T) (string, func()) {
 	config.AppConfig.DaylightStartHour = 0
 	config.AppConfig.DaylightEndHour = 24
 	os.MkdirAll(config.AppConfig.SnapshotsDir, 0755)
+	database.InitDB()
 
 	// Create some dummy snapshot files
 	for i := 0; i < 5; i++ {
@@ -225,11 +227,11 @@ func TestCreateVideoSegment_ErrorHandling(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "ffmpeg (create segment) execution failed")
 
-		// Check that the log file was written to for the error
-		logPath := config.GetFFmpegLogPath()
-		logContent, readErr := os.ReadFile(logPath)
+		// Check that the error was written to the DB log
+		today := time.Now().Format("2006-01-02")
+		logContent, readErr := database.GetFFmpegLogContent(today)
 		assert.NoError(t, readErr)
-		assert.Contains(t, string(logContent), "FFmpeg Error")
+		assert.Contains(t, logContent, "FFmpeg Error")
 	})
 }
 

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"time-machine/pkg/config"
+	"time-machine/pkg/database"
 	"time-machine/pkg/jobs"
 	"time-machine/pkg/models"
 	"time-machine/pkg/util"
@@ -66,6 +67,19 @@ func detectFFmpegCapabilities() {
 	})
 }
 
+// computeBufSize doubles the numeric portion of a bitrate string (e.g. "2M" → "4M").
+func computeBufSize(maxBitrate string) string {
+	if len(maxBitrate) < 2 {
+		return "4M"
+	}
+	suffix := strings.ToUpper(maxBitrate[len(maxBitrate)-1:])
+	n, err := strconv.Atoi(maxBitrate[:len(maxBitrate)-1])
+	if err != nil {
+		return "4M"
+	}
+	return fmt.Sprintf("%d%s", n*2, suffix)
+}
+
 var createVideoSegment = func(imagePath, segmentPath string) error {
 	// 1. Input Validation
 	info, err := os.Stat(imagePath)
@@ -80,6 +94,8 @@ var createVideoSegment = func(imagePath, segmentPath string) error {
 	defer cancel()
 
 	videoFilter := "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p"
+	maxBitrate := config.AppConfig.MaxBitrate
+	bufSize := computeBufSize(maxBitrate)
 	var cmd *exec.Cmd
 	if PreferredVideoCodec == "libsvtav1" {
 		cmd = exec.CommandContext(ctx, "ffmpeg",
@@ -95,6 +111,8 @@ var createVideoSegment = func(imagePath, segmentPath string) error {
 			"-g", "1", // Force Intra frame
 			"-keyint_min", "1",
 			"-crf", config.AppConfig.GetCRFValue(),
+			"-maxrate", maxBitrate,
+			"-bufsize", bufSize,
 			"-an",
 			"-f", "webm",
 			"-y", segmentPath,
@@ -112,6 +130,8 @@ var createVideoSegment = func(imagePath, segmentPath string) error {
 			"-g", "1",
 			"-keyint_min", "1",
 			"-crf", config.AppConfig.GetCRFValue(),
+			"-maxrate", maxBitrate,
+			"-bufsize", bufSize,
 			"-an",
 			"-f", "webm",
 			"-y", segmentPath,
@@ -124,13 +144,10 @@ var createVideoSegment = func(imagePath, segmentPath string) error {
 
 	err = cmd.Run()
 	if err != nil {
-		// Only log the output if the command actually failed
 		log.Printf("FFmpeg failed: %v. Output: %s", err, stderr.String())
-		// Also write to the daily log file for optional debugging
-		logFile, logErr := os.OpenFile(config.GetFFmpegLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if logErr == nil {
-			logFile.WriteString(fmt.Sprintf("--- FFmpeg Error: %s ---\n%s\n", time.Now(), stderr.String()))
-			logFile.Close()
+		today := time.Now().Format("2006-01-02")
+		if logErr := database.AppendFFmpegLog(today, "", fmt.Sprintf("--- FFmpeg Error: %s ---\n%s\n", time.Now(), stderr.String())); logErr != nil {
+			log.Printf("Warning: could not write FFmpeg error to DB: %v", logErr)
 		}
 		return fmt.Errorf("ffmpeg (create segment) execution failed for %s: %w", imagePath, err)
 	}
@@ -179,47 +196,29 @@ var concatenateVideos = func(existingVideoPath, newSegmentPath, outputVideoPath 
 	)
 	cmd.Dir = config.AppConfig.DataDir
 
-	logFile, err := os.OpenFile(config.GetFFmpegLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open FFmpeg log file: %w", err)
-	}
-	defer logFile.Close()
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
+	var outputBuf bytes.Buffer
+	cmd.Stdout = &outputBuf
+	cmd.Stderr = &outputBuf
 
 	if err := cmd.Run(); err != nil {
+		today := time.Now().Format("2006-01-02")
+		if logErr := database.AppendFFmpegLog(today, "", fmt.Sprintf("--- FFmpeg Concat Error: %s ---\n%s\n", time.Now(), outputBuf.String())); logErr != nil {
+			log.Printf("Warning: could not write FFmpeg concat error to DB: %v", logErr)
+		}
 		return fmt.Errorf("ffmpeg (concatenate) execution failed: %w", err)
 	}
 	log.Printf("Successfully concatenated videos into: %s", outputVideoPath)
 	return nil
 }
 
-// Helper to get the path of the sidecar file
-func getLastSnapshotTrackerPath(timelapseName string) string {
-	return filepath.Join(config.AppConfig.DataDir, fmt.Sprintf("timelapse_%s.last_snapshot.txt", timelapseName))
-}
-
-// readLastAppendedSnapshot reads the path of the last snapshot appended to a timelapse from its tracker file.
+// readLastAppendedSnapshot returns the last snapshot path recorded for a timelapse.
 var readLastAppendedSnapshot = func(timelapseName string) (string, error) {
-	trackerPath := getLastSnapshotTrackerPath(timelapseName)
-	content, err := os.ReadFile(trackerPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil // File not found is not an error, just means no snapshot tracked yet
-		}
-		return "", fmt.Errorf("failed to read last snapshot tracker for %s: %w", timelapseName, err)
-	}
-	return strings.TrimSpace(string(content)), nil
+	return database.GetTimelapseTracker(timelapseName)
 }
 
-// writeLastAppendedSnapshot writes the path of the last snapshot appended to a timelapse to its tracker file.
+// writeLastAppendedSnapshot records the last snapshot appended to a timelapse.
 var writeLastAppendedSnapshot = func(timelapseName, snapshotPath string) error {
-	trackerPath := getLastSnapshotTrackerPath(timelapseName)
-	err := os.WriteFile(trackerPath, []byte(snapshotPath), 0644)
-	if err != nil {
-		return fmt.Errorf("failed to write last snapshot tracker for %s: %w", timelapseName, err)
-	}
-	return nil
+	return database.SetTimelapseTracker(timelapseName, snapshotPath)
 }
 
 // --- VIDEO GENERATION AND CLEANUP IMPLEMENTATION ---
@@ -706,6 +705,8 @@ var regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string
 	defer cancel()
 
 	videoFilter := "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p"
+	maxBitrate := config.AppConfig.MaxBitrate
+	bufSize := computeBufSize(maxBitrate)
 	var cmd *exec.Cmd
 	if PreferredVideoCodec == "libsvtav1" {
 		cmd = exec.CommandContext(ctx, "ffmpeg",
@@ -715,6 +716,8 @@ var regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string
 			"-c:v", PreferredVideoCodec, "-preset", "10",
 			"-threads", fmt.Sprintf("%d", ffmpegThreads),
 			"-crf", config.AppConfig.GetCRFValue(),
+			"-maxrate", maxBitrate,
+			"-bufsize", bufSize,
 			"-an", "-f", "webm", "-y", tempVideoPath,
 		)
 	} else {
@@ -725,6 +728,8 @@ var regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string
 			"-c:v", PreferredVideoCodec,
 			"-threads", fmt.Sprintf("%d", ffmpegThreads),
 			"-crf", config.AppConfig.GetCRFValue(),
+			"-maxrate", maxBitrate,
+			"-bufsize", bufSize,
 			"-an", "-f", "webm", "-y", tempVideoPath,
 		)
 	}
@@ -734,10 +739,9 @@ var regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		os.Remove(tempVideoPath)
-		logFile, logErr := os.OpenFile(config.GetFFmpegLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if logErr == nil {
-			logFile.WriteString(fmt.Sprintf("--- FFmpeg Batch Error for %s: %s ---\n%s\n", outputFileName, time.Now(), stderr.String()))
-			logFile.Close()
+		today := time.Now().Format("2006-01-02")
+		if logErr := database.AppendFFmpegLog(today, outputFileName, fmt.Sprintf("--- FFmpeg Batch Error for %s: %s ---\n%s\n", outputFileName, time.Now(), stderr.String())); logErr != nil {
+			log.Printf("Warning: could not write FFmpeg batch error to DB: %v", logErr)
 		}
 		return fmt.Errorf("ffmpeg batch encode failed for %s: %w", outputFileName, err)
 	}
