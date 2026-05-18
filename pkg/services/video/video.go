@@ -27,23 +27,28 @@ import (
 
 var (
 	PreferredVideoCodec    string
-	ffmpegThreads          int
 	onceDetectCapabilities sync.Once
 )
+
+// getFFmpegThreads returns the configured FFmpeg thread count.
+// A setting of 0 means auto-detect: use CPU count capped at 8.
+func getFFmpegThreads() int {
+	n := settings.GetInt("video.ffmpeg_threads", 0)
+	if n <= 0 {
+		n = runtime.NumCPU()
+		if n > 8 {
+			n = 8
+		}
+		if n < 1 {
+			n = 1
+		}
+	}
+	return n
+}
 
 func detectFFmpegCapabilities() {
 	onceDetectCapabilities.Do(func() {
 		log.Println("Detecting FFmpeg capabilities...")
-
-		// Determine CPU core count
-		ffmpegThreads = runtime.NumCPU()
-		if ffmpegThreads > 8 { // Cap threads to 8 to avoid excessive resource usage for FFmpeg
-			ffmpegThreads = 8
-		}
-		if ffmpegThreads < 1 {
-			ffmpegThreads = 1 // Ensure at least one thread
-		}
-		log.Printf("Detected %d CPU cores, setting FFmpeg threads to %d.", runtime.NumCPU(), ffmpegThreads)
 
 		// Check for libaom-av1
 		cmd := exec.Command("ffmpeg", "-hide_banner", "-encoders")
@@ -88,7 +93,7 @@ var createVideoSegment = func(imagePath, segmentPath string) error {
 		return fmt.Errorf("invalid snapshot file (not found or zero size): %s", imagePath)
 	}
 
-	log.Printf("Creating video segment for %s using codec %s with %d threads...", filepath.Base(imagePath), PreferredVideoCodec, ffmpegThreads)
+	log.Printf("Creating video segment for %s using codec %s with %d threads...", filepath.Base(imagePath), PreferredVideoCodec, getFFmpegThreads())
 
 	// 2. Process Control (Timeout)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -109,7 +114,7 @@ var createVideoSegment = func(imagePath, segmentPath string) error {
 			"-vf", videoFilter,
 			"-c:v", PreferredVideoCodec,
 			"-preset", "10",
-			"-threads", fmt.Sprintf("%d", ffmpegThreads),
+			"-threads", fmt.Sprintf("%d", getFFmpegThreads()),
 			"-g", "1", // Force Intra frame
 			"-keyint_min", "1",
 			"-crf", crf,
@@ -128,7 +133,7 @@ var createVideoSegment = func(imagePath, segmentPath string) error {
 			"-t", "0.0333",
 			"-vf", videoFilter,
 			"-c:v", PreferredVideoCodec,
-			"-threads", fmt.Sprintf("%d", ffmpegThreads),
+			"-threads", fmt.Sprintf("%d", getFFmpegThreads()),
 			"-g", "1",
 			"-keyint_min", "1",
 			"-crf", crf,
@@ -193,7 +198,7 @@ var concatenateVideos = func(existingVideoPath, newSegmentPath, outputVideoPath 
 		"-safe", "0",
 		"-i", concatListPath,
 		"-c", "copy", // Stream copy, not re-encode
-		"-threads", fmt.Sprintf("%d", ffmpegThreads),
+		"-threads", fmt.Sprintf("%d", getFFmpegThreads()),
 		"-y", tempOutput,
 	)
 	cmd.Dir = config.AppConfig.DataDir
@@ -827,7 +832,7 @@ var regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string
 			"-f", "concat", "-safe", "0", "-i", concatListPath,
 			"-vf", videoFilter,
 			"-c:v", PreferredVideoCodec, "-preset", "10",
-			"-threads", fmt.Sprintf("%d", ffmpegThreads),
+			"-threads", fmt.Sprintf("%d", getFFmpegThreads()),
 			"-crf", crf,
 			"-maxrate", maxBitrate,
 			"-bufsize", bufSize,
@@ -839,7 +844,7 @@ var regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string
 			"-f", "concat", "-safe", "0", "-i", concatListPath,
 			"-vf", videoFilter,
 			"-c:v", PreferredVideoCodec,
-			"-threads", fmt.Sprintf("%d", ffmpegThreads),
+			"-threads", fmt.Sprintf("%d", getFFmpegThreads()),
 			"-crf", crf,
 			"-maxrate", maxBitrate,
 			"-bufsize", bufSize,

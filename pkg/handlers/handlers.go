@@ -514,22 +514,30 @@ var integerSettingKeys = map[string]bool{
 	"video.daylight_target_hour": true,
 	"video.weekly_keep":          true,
 	"video.monthly_keep":         true,
+	"video.ffmpeg_threads":       true,
 }
 
-// HandleDataFile serves files from DataDir with correct MIME types for HLS segments and playlists.
+// HandleDataFile serves files from DataDir with correct MIME types and cache headers.
 func HandleDataFile(c *gin.Context) {
 	fp := c.Param("filepath")
-	absPath := filepath.Join(config.AppConfig.DataDir, filepath.FromSlash(fp))
-	// Prevent path traversal
+	// Clean before joining to block path traversal (e.g. "/../etc/passwd")
+	absPath := filepath.Clean(filepath.Join(config.AppConfig.DataDir, filepath.FromSlash(fp)))
 	if !strings.HasPrefix(absPath, config.AppConfig.DataDir) {
 		c.Status(http.StatusForbidden)
 		return
 	}
 	switch {
-	case strings.HasSuffix(fp, ".m3u8"):
-		c.Header("Content-Type", "application/x-mpegURL")
 	case strings.HasSuffix(fp, ".ts"):
+		// HLS segments are write-once; cache for 1 year
 		c.Header("Content-Type", "video/MP2T")
+		c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	case strings.HasSuffix(fp, ".m3u8"):
+		// VOD playlists don't change after generation; 1-hour TTL is safe
+		c.Header("Content-Type", "application/x-mpegURL")
+		c.Header("Cache-Control", "public, max-age=3600")
+	case strings.HasSuffix(fp, ".jpg"), strings.HasSuffix(fp, ".jpeg"):
+		// Snapshots are immutable once captured
+		c.Header("Cache-Control", "public, max-age=86400")
 	}
 	c.File(absPath)
 }

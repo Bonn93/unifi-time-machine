@@ -19,10 +19,22 @@ import (
 
 // HLSQuality describes a single quality level within an HLS stream.
 type HLSQuality struct {
-	Label     string // "source", "720p", "480p"
-	Height    int    // 0 = pass-through (source resolution)
-	CRF       int
-	Bandwidth int // approximate bps for the master playlist
+	Label      string // "source", "720p", "480p"
+	Height     int    // 0 = pass-through (source resolution)
+	CRF        int
+	Bandwidth  int    // approximate bps for the master playlist
+	MaxBitrate string // per-level hard cap passed to ffmpeg -maxrate
+	BufSize    string // corresponding -bufsize (2× MaxBitrate)
+}
+
+// hlsMaxBitrate returns the per-level ffmpeg -maxrate string: 2× the bandwidth
+// estimate, rounded up to the nearest Mbps. Source gets ~16M, 720p gets ~6M, etc.
+func hlsMaxBitrate(bw int) string {
+	mbps := (bw + 999_999) / 1_000_000 // ceil to nearest Mbps
+	if mbps < 1 {
+		mbps = 1
+	}
+	return fmt.Sprintf("%dM", mbps*2)
 }
 
 // parseHLSQualities converts a comma-separated quality string (e.g. "source,720p") into HLSQuality entries.
@@ -33,7 +45,9 @@ func parseHLSQualities(raw string) []HLSQuality {
 	}
 
 	heightFor := map[string]int{"source": 0, "1080p": 1080, "720p": 720, "480p": 480}
-	bwFor := map[string]int{"source": 4_000_000, "1080p": 3_000_000, "720p": 2_000_000, "480p": 800_000}
+	// Bandwidth estimates (bps) used in the master playlist and to derive per-level maxrate caps.
+	// source: 8 Mbps allows CRF to breathe on 4K content; downscaled levels scaled to resolution.
+	bwFor := map[string]int{"source": 8_000_000, "1080p": 6_000_000, "720p": 3_000_000, "480p": 1_200_000}
 	crfDelta := map[string]int{"source": 0, "1080p": 0, "720p": 2, "480p": 4}
 
 	var qualities []HLSQuality
@@ -42,16 +56,25 @@ func parseHLSQualities(raw string) []HLSQuality {
 		if label == "" {
 			continue
 		}
-		delta := crfDelta[label] // 0 for unknown labels
+		bw := bwFor[label]
+		if bw == 0 {
+			bw = 4_000_000 // unknown label fallback
+		}
+		mr := hlsMaxBitrate(bw)
 		qualities = append(qualities, HLSQuality{
-			Label:     label,
-			Height:    heightFor[label],
-			CRF:       baseCRF + delta,
-			Bandwidth: bwFor[label],
+			Label:      label,
+			Height:     heightFor[label],
+			CRF:        baseCRF + crfDelta[label],
+			Bandwidth:  bw,
+			MaxBitrate: mr,
+			BufSize:    computeBufSize(mr),
 		})
 	}
 	if len(qualities) == 0 {
-		qualities = []HLSQuality{{Label: "source", Height: 0, CRF: baseCRF, Bandwidth: 4_000_000}}
+		qualities = []HLSQuality{{
+			Label: "source", Height: 0, CRF: baseCRF,
+			Bandwidth: 8_000_000, MaxBitrate: "16M", BufSize: "32M",
+		}}
 	}
 	return qualities
 }
@@ -114,13 +137,11 @@ func generateHLS(name, concatListPath string, qualities []HLSQuality) error {
 
 	segSec := settings.GetInt("video.hls_segment_sec", 4)
 	preset := settings.Get("video.encoder_preset", "fast")
-	maxBitrate := settings.Get("video.max_bitrate", "2M")
-	bufSize := computeBufSize(maxBitrate)
 
 	args := []string{
 		"-hide_banner", "-loglevel", "error",
 		"-f", "concat", "-safe", "0", "-i", concatListPath,
-		"-threads", fmt.Sprintf("%d", ffmpegThreads),
+		"-threads", fmt.Sprintf("%d", getFFmpegThreads()),
 	}
 
 	if len(qualities) > 1 {
@@ -154,7 +175,7 @@ func generateHLS(name, concatListPath string, qualities []HLSQuality) error {
 			"-preset", preset,
 			"-crf", fmt.Sprintf("%d", q.CRF),
 			"-g", "48", "-sc_threshold", "0",
-			"-maxrate", maxBitrate, "-bufsize", bufSize,
+			"-maxrate", q.MaxBitrate, "-bufsize", q.BufSize,
 			"-hls_time", fmt.Sprintf("%d", segSec),
 			"-hls_playlist_type", "vod",
 			"-hls_segment_filename", segFile,
@@ -240,7 +261,7 @@ func generateMP4(name, concatListPath string) error {
 		"-crf", crf,
 		"-maxrate", maxBitrate, "-bufsize", bufSize,
 		"-movflags", "+faststart",
-		"-threads", fmt.Sprintf("%d", ffmpegThreads),
+		"-threads", fmt.Sprintf("%d", getFFmpegThreads()),
 		"-an", "-y", tempPath,
 	)
 	var stderr bytes.Buffer

@@ -39,6 +39,7 @@ var KnownSettings = []SeedEntry{
 	{"video.weekly_keep", "WEEKLY_LAPSES_TO_KEEP", "4"},
 	{"video.monthly_keep", "MONTHLY_LAPSES_TO_KEEP", "3"},
 	{"snapshot.hq_params", "HQSNAP", "auto"},
+	{"video.ffmpeg_threads", "FFMPEG_THREADS", "0"},
 }
 
 var (

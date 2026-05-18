@@ -45,7 +45,7 @@ func TestParseHLSQualities_Single(t *testing.T) {
 	qs := parseHLSQualities("source")
 	require.Len(t, qs, 1)
 	assert.Equal(t, "source", qs[0].Label)
-	assert.Equal(t, 4_000_000, qs[0].Bandwidth)
+	assert.Equal(t, 8_000_000, qs[0].Bandwidth)
 }
 
 func TestParseHLSQualities_Empty(t *testing.T) {

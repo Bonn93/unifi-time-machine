@@ -212,20 +212,20 @@
                                 <option value="ultra"  {{ if eq (index .Settings "video.quality") "ultra"  }}selected{{ end }}>Ultra</option>
                             </select>
                             <div class="form-text text-secondary">
-                                Sets the CRF (Constant Rate Factor) used by the encoder. Lower CRF = better visual quality but larger files and longer encode times.
-                                Low = CRF 35 (~small files), Medium = CRF 28 (balanced), High = CRF 20 (sharp), Ultra = CRF 15 (near-lossless).
-                                For timelapse content, <strong>Medium</strong> is a good default.
+                                Sets the CRF (Constant Rate Factor) — the encoder's quality target. Lower CRF = sharper image, larger files, longer encode.
+                                <strong>Low</strong> = CRF 35 (small files), <strong>Medium</strong> = CRF 28 (balanced), <strong>High</strong> = CRF 20 (sharp), <strong>Ultra</strong> = CRF 15 (near-lossless).
+                                For HLS, lower quality levels use a slightly higher CRF automatically: 720p adds +2, 480p adds +4 to the base — so they stay proportionally smaller without a separate quality setting.
+                                <strong>Medium</strong> is a good default for timelapse content from most cameras. Use <strong>High</strong> for 4K/G6 sources where detail matters.
                             </div>
                         </div>
 
-                        <div class="col-md-4">
-                            <label class="form-label">Max Bitrate</label>
+                        <div class="col-md-4" id="maxBitrateField">
+                            <label class="form-label">Max Bitrate <span class="badge bg-secondary ms-1" style="font-size:0.65rem;">WebM / MP4 only</span></label>
                             <input type="text" class="form-control" name="video.max_bitrate" value="{{ index .Settings "video.max_bitrate" }}" placeholder="e.g. 2M">
                             <div class="form-text text-secondary">
-                                A hard ceiling on the encoded bitrate (e.g. <code>2M</code> = 2 Mbps, <code>4M</code> = 4 Mbps).
-                                The CRF quality setting still applies — this cap only kicks in during high-motion scenes to prevent file size spikes.
-                                Lower values mean smaller files and less bandwidth required to stream, but may cause visible quality drops during fast movement.
-                                <strong>2M–4M</strong> is suitable for most home setups.
+                                Hard ceiling on the encoded bitrate for <strong>WebM and MP4</strong> output (e.g. <code>2M</code> = 2 Mbps, <code>4M</code> = 4 Mbps).
+                                CRF controls average quality; this cap prevents spikes during complex scenes. <strong>2M–4M</strong> suits most setups.
+                                <br><em>Not used for HLS</em> — each HLS quality level has its own automatic ceiling based on its resolution (source: 16M, 1080p: 12M, 720p: 6M, 480p: 4M), so CRF drives quality without a global cap crushing 4K detail.
                             </div>
                         </div>
 
@@ -240,6 +240,16 @@
                                 Controls the speed vs compression efficiency tradeoff. <strong>Fast</strong> finishes quickly using more CPU cycles per second but less total time — ideal for Raspberry Pi or NAS devices.
                                 <strong>Slow</strong> achieves smaller file sizes at the same quality level but can take 3–5× longer to encode.
                                 Unless your hardware is powerful, keep this on <strong>Fast</strong>.
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">FFmpeg Threads</label>
+                            <input type="number" class="form-control" name="video.ffmpeg_threads" value="{{ index .Settings "video.ffmpeg_threads" }}" min="0" max="32">
+                            <div class="form-text text-secondary">
+                                Number of CPU threads FFmpeg may use per encode. <strong>0 (default) = auto-detect</strong>: uses all available cores, capped at 8.
+                                Set a lower value (e.g. <strong>2</strong> or <strong>4</strong>) to limit CPU usage and leave headroom for other processes.
+                                Raising this above the physical core count has no benefit and may slow encoding.
                             </div>
                         </div>
 
@@ -272,12 +282,16 @@
                                 <label class="form-label">Quality Levels (comma-separated)</label>
                                 <input type="text" class="form-control" name="video.hls_qualities" value="{{ index .Settings "video.hls_qualities" }}" placeholder="source,720p,480p">
                                 <div class="form-text text-secondary">
-                                    Comma-separated list of quality levels to encode into the HLS stream.
-                                    <strong>source</strong> = original camera resolution (no downscale).
-                                    <strong>1080p / 720p / 480p</strong> = downscaled variants for slower connections.
-                                    The player auto-selects the best level based on available bandwidth (ABR).
-                                    Encoding more levels increases CPU time and disk usage proportionally.
-                                    Example: <code>source,720p</code> or <code>source,1080p,720p,480p</code>.
+                                    Comma-separated list of quality levels encoded into the adaptive HLS stream.
+                                    <strong>source</strong> = original camera resolution with no downscale (recommended — preserves 4K detail).
+                                    <strong>1080p / 720p / 480p</strong> = downscaled fallback variants the player switches to on slower connections.
+                                    The Video.js player shows a gear icon so viewers can lock to a specific level or leave it on Auto (ABR).
+                                    <br>
+                                    Each level has an <strong>automatic per-level bitrate ceiling</strong> — the global Max Bitrate setting is not used for HLS:
+                                    <code>source</code> → 16M cap, <code>1080p</code> → 12M, <code>720p</code> → 6M, <code>480p</code> → 4M.
+                                    These generous caps let CRF control average quality while still preventing runaway file sizes on complex frames.
+                                    All levels are encoded in a <strong>single FFmpeg pass</strong>, so adding more levels costs extra CPU time but not extra wall-clock time per level.
+                                    Example: <code>source,720p</code> (recommended for 4K cameras) or <code>source,1080p,720p,480p</code> (full ladder for variable connections).
                                 </div>
                             </div>
                         </div>
@@ -432,6 +446,9 @@
         function onFormatChange() {
             var fmt = document.getElementById('videoFormat').value;
             document.getElementById('hlsFields').style.display = fmt === 'hls' ? 'block' : 'none';
+            // Max Bitrate is not used for HLS — each level has its own automatic cap
+            var maxBr = document.getElementById('maxBitrateField');
+            if (maxBr) maxBr.style.display = fmt === 'hls' ? 'none' : '';
             var warn = document.getElementById('formatChangeWarning');
             if (warn) {
                 warn.style.display = (fmt !== originalFormat) ? 'block' : 'none';

@@ -91,6 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const pollAndUpdateDashboard = async () => {
+        if (document.hidden) return;
         try {
             const response = await fetch('/api/images');
             const data     = await response.json();
@@ -100,7 +101,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     pollAndUpdateDashboard();
-    setInterval(pollAndUpdateDashboard, 5000);
+    let statsInterval = setInterval(pollAndUpdateDashboard, 30000);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            clearInterval(statsInterval);
+        } else {
+            pollAndUpdateDashboard();
+            statsInterval = setInterval(pollAndUpdateDashboard, 30000);
+        }
+    });
 
     // --- Timelapse select handlers ---
     document.querySelectorAll('.timelapse-select').forEach(select => {
@@ -178,7 +187,7 @@ function renderGallery(galleryData, displayDate) {
             content = `
                 <div class="gallery-image-container">
                     <a href="${item.url}" target="_blank">
-                        <img src="${item.url}" class="gallery-image" alt="Snapshot at ${item.time}">
+                        <img src="${item.url}" class="gallery-image" loading="lazy" decoding="async" alt="Snapshot at ${item.time}">
                     </a>
                 </div>`;
         } else {
