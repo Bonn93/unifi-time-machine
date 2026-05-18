@@ -26,10 +26,9 @@ changelog:
     - title: Other Changes
       order: 999
 
-# GitHub Release — RELEASE_NOTES.txt is used as the release body header
-# (human-readable summary), followed by the auto-generated git changelog.
+# GitHub Release — RELEASE_NOTES.txt is attached as a downloadable asset.
+# The release body is the auto-generated git changelog above.
 release:
-  header_file: RELEASE_NOTES.txt
   extra_files:
     - glob: RELEASE_NOTES.txt
   footer: |
