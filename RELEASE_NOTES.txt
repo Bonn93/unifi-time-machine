@@ -1,12 +1,147 @@
+## 📦 version v0.0.6
+
+> **Before upgrading from v0.0.5:** back up your `data/lapse.db` file. Two new DB migrations
+> run automatically on first start. Your existing WebM timelapses and all user accounts are
+> preserved. If you switch output format to HLS or MP4, the old WebM files are cleaned up
+> automatically once the new format is confirmed — copy them elsewhere first if you want to
+> keep them.
+
+---
+
+### ✨ What's New
+
+#### HLS Adaptive Streaming
+- **New output format: HLS / H.264** — timelapses are split into short segments served via an
+  `.m3u8` playlist. Playback starts after the first segment (~4 s) instead of waiting for the
+  full file to buffer — a big improvement on slow connections and behind reverse proxies.
+- **Adaptive bitrate (ABR)** — Video.js automatically switches quality based on available
+  bandwidth, exactly like YouTube. Manual quality selection is also available via the gear icon.
+- **All quality levels encoded in one FFmpeg pass** — `source + 720p + 480p` costs roughly the
+  same wall-clock time as encoding a single level, because FFmpeg splits and scales in one run.
+- **Per-level bitrate ceilings** — each quality level now has its own automatic bitrate cap so
+  CRF can do its job without a global 2 Mbps limit crushing 4K detail:
+
+  | Level  | Bitrate cap |
+  |--------|-------------|
+  | source | 16 M        |
+  | 1080p  | 12 M        |
+  | 720p   |  6 M        |
+  | 480p   |  4 M        |
+
+- **ffprobe source-resolution detection** — the master playlist carries an accurate `RESOLUTION`
+  tag for the pass-through level so the quality selector correctly labels the 4K rendition.
+- New **MP4 / H.264** single-file format also available — universal hardware decode on all
+  devices, good middle ground between WebM and HLS.
+- Existing `.webm` files are untouched when the format is changed. The new format is generated
+  on the next scheduled run; old files are cleaned up once the new format is confirmed.
+
+#### Video.js Player with Quality Selector
+- Replaced the plain HTML5 `<video>` element with **Video.js 8** and the VHS (HTTP Streaming)
+  engine — no extra hls.js dependency needed.
+- **Quality selector** (gear icon) shows Auto + each encoded level. Auto uses ABR; selecting a
+  level locks to it.
+- **Playback speed** (0.5 × – 2 ×) available for all formats.
+- VHS configured with `limitRenditionByPlayerDimensions: false` and a high initial bandwidth
+  estimate so 4K / G6 cameras default to the highest quality rather than 720p.
+- HTTP cache headers added to all served files — HLS segments are marked `immutable` (1 year),
+  playlists get a 1-hour TTL, and gallery images get a 24-hour TTL. Remote users seeking through
+  a timelapse no longer re-download segments they already have.
+
+#### DB-Driven Settings & Admin Panel
+- All operational configuration is now stored in a **`settings` DB table** and editable at
+  runtime via Admin → Settings — no container restart required.
+- On first startup, existing env var values are automatically seeded into the database.
+- After first startup, env vars are ignored in favour of DB values. Use the admin panel to
+  change anything.
+- **FFmpeg threads** (`video.ffmpeg_threads`) is now a DB setting. `0` (default) = auto-detect,
+  capped at 8 cores. Lower it to leave headroom for other processes on shared hardware.
+- Settings panel includes detailed explainer text, valid ranges, and a CPU warning when
+  changing the output format.
+- Max Bitrate field is hidden automatically when HLS is selected (HLS uses per-level caps).
+- HLS-specific fields (segment duration, quality levels) are shown only when HLS is selected.
+
+#### FFmpeg Log Moved to SQLite
+- FFmpeg encode logs are now stored in the `ffmpeg_logs` DB table instead of `.txt` files on
+  disk. The "View FFmpeg Log" link in the UI reads from the DB.
+- Old `.txt` log files are not migrated and can be safely deleted from `data/`.
+
+#### Dashboard & Gallery Performance
+- Stats polling interval reduced from every **5 s** to every **30 s**.
+- Polling pauses entirely when the browser tab is hidden (Page Visibility API) — no background
+  network traffic while you're not looking at the page.
+- Gallery images use `loading="lazy"` and `decoding="async"` — only the images near the
+  viewport are fetched, instead of all 24 hours simultaneously. Critical for remote users.
+- Path traversal hardening: `HandleDataFile` now runs `filepath.Clean` before the prefix check.
+
+---
+
+### ⚙️ Environment Variables
+
+**Always required** (bootstrap — never stored in DB):
+
+| Variable           | Description                                              |
+|--------------------|----------------------------------------------------------|
+| `UFP_HOST`         | IP / hostname of your UniFi Protect controller           |
+| `UFP_API_KEY`      | API key from your Protect user account                   |
+| `TARGET_CAMERA_ID` | Camera ID to capture from                                |
+| `APP_KEY`          | Base64-encoded secret for JWT signing                    |
+| `ADMIN_PASSWORD`   | Initial admin password (only used if no users exist yet) |
+
+**Seed-only** — set the initial DB value on first launch, ignored on every subsequent start.
+After the first run, use **Admin → Settings** to change these:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `VIDEO_FORMAT` | `webm` | `webm` (AV1), `mp4` (H.264), `hls` (adaptive) |
+| `VIDEO_MAX_BITRATE` | `2M` | WebM / MP4 only; HLS uses per-level caps |
+| `VIDEO_QUALITY` | `medium` | `low` / `medium` / `high` / `ultra` |
+| `FFMPEG_THREADS` | `0` | `0` = auto (CPU count, capped at 8) |
+| `TIMELAPSE_INTERVAL` | `3600` | Seconds between snapshots |
+| `VIDEO_CRON_INTERVAL` | `300` | Seconds between generation checks |
+| `HQSNAP` | `auto` | `true` / `false` / `auto` |
+| `DAYS_OF_24_HOUR_SNAPSHOTS` | `30` | |
+| `SNAPSHOT_RETENTION_DAYS` | `30` | |
+| `GALLERY_RETENTION_DAYS` | `365` | |
+| `SHARE_LINK_EXPIRY_HOURS` | `4` | `0` = unlimited |
+| `DATE_FORMAT` | `DD/MM/YYYY` | |
+| `TIME_FORMAT` | `12h` | `12h` / `24h` |
+| `DAYLIGHT_START_HOUR` | `7` | |
+| `DAYLIGHT_END_HOUR` | `19` | |
+| `DAYLIGHT_TARGET_HOUR` | `12` | |
+| `WEEKLY_LAPSES_TO_KEEP` | `4` | |
+| `MONTHLY_LAPSES_TO_KEEP` | `3` | |
+
+Existing `docker-compose.yml` files and `start.sh` scripts remain fully compatible — all the
+old env vars are still accepted as seeds. The simplified examples below only include the
+required bootstrap variables; everything else is configured via the admin panel.
+
+---
+
+### 🗄️ Database Migrations
+
+Two new migrations run automatically on first start of v0.0.6:
+
+- **Migration 8** — `settings` table (`key TEXT PRIMARY KEY`, `value TEXT`, `updated_at`)
+- **Migration 9** — `updated_at` trigger on the `settings` table
+
+No manual action required. The database is upgraded in place.
+
+---
+
 ## 📦 version v0.0.5
 
 ### 🚨 Migration Notice — Timelapse Naming Change
 
-Timelapses are now calendar-fixed (Mon–Sun weeks, calendar months, full years) instead of rolling windows. This fixes night images appearing in lapses and weekly lapses accumulating more than a week of data.
+Timelapses are now calendar-fixed (Mon–Sun weeks, calendar months, full years) instead of
+rolling windows. This fixes night images appearing in lapses and weekly lapses accumulating
+more than a week of data.
 
-**Your existing timelapse files are NOT deleted automatically.** The UI will show "no timelapse available yet" for weekly/monthly/yearly until you rename them or the next generation cycle completes.
+**Your existing timelapse files are NOT deleted automatically.** The UI will show "no timelapse
+available yet" for weekly/monthly/yearly until you rename them or the next generation cycle
+completes.
 
-To restore your existing lapses immediately, run the following on your host in the `data/` directory (adjust the dates to today's current week/month/year):
+To restore your existing lapses immediately, run the following on your host in the `data/`
+directory (adjust the dates to today's current week/month/year):
 
 ```bash
 mv timelapse_1_year.webm  timelapse_year_2026.webm
@@ -14,7 +149,8 @@ mv timelapse_1_month.webm timelapse_month_2026-05.webm
 mv timelapse_1_week.webm  timelapse_week_2026-05-11.webm   # use the Monday date of the current week
 ```
 
-Old archive files (`timelapse_1_week_YYYYMMDD_HHMMSS.webm`) can be renamed to `timelapse_week_YYYY-MM-DD.webm` (Monday date) or safely deleted.
+Old archive files (`timelapse_1_week_YYYYMMDD_HHMMSS.webm`) can be renamed to
+`timelapse_week_YYYY-MM-DD.webm` (Monday date) or safely deleted.
 
 ### ⚙️ Environment Variable Changes
 
@@ -48,11 +184,11 @@ Old archive files (`timelapse_1_week_YYYYMMDD_HHMMSS.webm`) can be renamed to `t
 * Various dependency updates including sqlite, crypto packages, JWT and more
 * Updated UI - more structured approach fits on more screens, more scroll like format to show all videos
 * Improved stats card and performance
-* NEW - public url sharing with timed limits ( see env var for config ) 
+* NEW - public url sharing with timed limits ( see env var for config )
 * NEW - admin improvements delete, update existing users in the UI
 * Fixed ffmpeg/view log with large ffmpeg logs, now uses streaming
 * Various bug fixes and stability/durability improvements
-* Update Readme prior to a docs site 
+* Update Readme prior to a docs site
 * Renovate system now added to repo for constant dependency upgrades
 
 ## 📦 version v0.0.3
@@ -69,5 +205,5 @@ Old archive files (`timelapse_1_week_YYYYMMDD_HHMMSS.webm`) can be renamed to `t
 
 ## 🚨 Migration Required - latest/older development tags
 We have moved from running as `root` to running as `appuser` with UID/GID `1000:1000` for improved security and compatibility.
-**Action Required:** Please run `chown -R 1000:1000 ./data` on your host machine before starting this container or destory and fully recreate.
+**Action Required:** Please run `chown -R 1000:1000 ./data` on your host machine before starting this container or destroy and fully recreate.
 If not you will see issues like `2025/12/15 16:57:58 Error enqueuing job for timelapse 24_hour: failed to insert job: attempt to write a readonly database`.
