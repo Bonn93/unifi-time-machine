@@ -9,6 +9,7 @@ import (
 	"time-machine/pkg/database"
 	"time-machine/pkg/jobs"
 	"time-machine/pkg/server"
+	"time-machine/pkg/services/settings"
 	"time-machine/pkg/services/share"
 	"time-machine/pkg/services/snapshot"
 	"time-machine/pkg/services/video"
@@ -29,6 +30,7 @@ func main() {
 
 	// Initialize Database
 	database.InitDB()
+	settings.Init()
 	jobs.InitJobs(database.GetDB())
 
 	// Create initial admin user if it doesn't exist
@@ -54,8 +56,8 @@ func main() {
 	go snapshot.StartSnapshotScheduler()
 	go video.StartVideoGeneratorScheduler()
 	go share.StartShareLinkCleanupScheduler()
-	log.Printf("✅ Snapshot Scheduler started with interval: %d seconds", config.AppConfig.SnapshotIntervalSec)
-	log.Printf("✅ Video Generation Scheduler started with interval: %d seconds", config.AppConfig.VideoCronIntervalSec)
+	log.Printf("✅ Snapshot Scheduler started (interval: %ds)", settings.GetInt("snapshot.interval_sec", 3600))
+	log.Printf("✅ Video Generation Scheduler started (interval: %ds)", settings.GetInt("video.cron_interval_sec", 300))
 
 	server.StartServer()
 }

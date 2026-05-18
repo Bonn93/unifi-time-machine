@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"time-machine/pkg/config"
+	"time-machine/pkg/database"
 	"time-machine/pkg/jobs"
 	"time-machine/pkg/models"
+	"time-machine/pkg/services/settings"
 	"time-machine/pkg/util"
 
 	"github.com/stretchr/testify/assert"
@@ -22,9 +24,12 @@ func setupTest(t *testing.T) (string, func()) {
 
 	config.AppConfig.DataDir = tempDir
 	config.AppConfig.SnapshotsDir = filepath.Join(tempDir, "snapshots")
-	config.AppConfig.DaylightStartHour = 0
-	config.AppConfig.DaylightEndHour = 24
 	os.MkdirAll(config.AppConfig.SnapshotsDir, 0755)
+	database.InitDB()
+	settings.Init()
+	settings.Set("video.daylight_start_hour", "0")
+	settings.Set("video.daylight_end_hour", "24")
+	settings.Invalidate()
 
 	// Create some dummy snapshot files
 	for i := 0; i < 5; i++ {
@@ -56,25 +61,16 @@ func TestReadWriteLastAppendedSnapshot(t *testing.T) {
 }
 
 func TestFilterSnapshots(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "video-filter-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+	_, cleanup := setupTest(t)
+	defer cleanup()
 
-	originalSnapshotsDir := config.AppConfig.SnapshotsDir
-	originalDaylightStart := config.AppConfig.DaylightStartHour
-	originalDaylightEnd := config.AppConfig.DaylightEndHour
-	originalDaylightTarget := config.AppConfig.DaylightTargetHour
-	config.AppConfig.SnapshotsDir = filepath.Join(tempDir, "snapshots")
-	config.AppConfig.DaylightStartHour = 0
-	config.AppConfig.DaylightEndHour = 24
-	config.AppConfig.DaylightTargetHour = 12
-	defer func() {
-		config.AppConfig.SnapshotsDir = originalSnapshotsDir
-		config.AppConfig.DaylightStartHour = originalDaylightStart
-		config.AppConfig.DaylightEndHour = originalDaylightEnd
-		config.AppConfig.DaylightTargetHour = originalDaylightTarget
-	}()
+	// Reset snapshots dir — setupTest pre-populates it with 5 current-hour files.
+	os.RemoveAll(config.AppConfig.SnapshotsDir)
 	os.MkdirAll(config.AppConfig.SnapshotsDir, 0755)
+	settings.Set("video.daylight_start_hour", "0")
+	settings.Set("video.daylight_end_hour", "24")
+	settings.Set("video.daylight_target_hour", "12")
+	settings.Invalidate()
 
 	// Fixed reference time: noon on Dec 22nd 2025
 	testTime := time.Date(2025, 12, 22, 12, 0, 0, 0, time.UTC)
@@ -120,9 +116,8 @@ func TestCleanupSnapshots(t *testing.T) {
 	defer cleanup()
 
 	// Set a specific retention period for this test
-	originalRetentionDays := config.AppConfig.SnapshotRetentionDays
-	config.AppConfig.SnapshotRetentionDays = 10
-	defer func() { config.AppConfig.SnapshotRetentionDays = originalRetentionDays }()
+	settings.Set("snapshot.retention_days", "10")
+	settings.Invalidate()
 
 	// Create an old file that should be deleted
 	oldTime := time.Now().Add(-11 * 24 * time.Hour)
@@ -225,11 +220,11 @@ func TestCreateVideoSegment_ErrorHandling(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "ffmpeg (create segment) execution failed")
 
-		// Check that the log file was written to for the error
-		logPath := config.GetFFmpegLogPath()
-		logContent, readErr := os.ReadFile(logPath)
+		// Check that the error was written to the DB log
+		today := time.Now().Format("2006-01-02")
+		logContent, readErr := database.GetFFmpegLogContent(today)
 		assert.NoError(t, readErr)
-		assert.Contains(t, string(logContent), "FFmpeg Error")
+		assert.Contains(t, logContent, "FFmpeg Error")
 	})
 }
 
@@ -238,9 +233,8 @@ func TestCleanOldVideos(t *testing.T) {
 	defer cleanup()
 
 	// --- Test Daily 24-Hour Timelapses Cleanup ---
-	originalDaysOf24HourSnapshots := config.AppConfig.DaysOf24HourSnapshots
-	config.AppConfig.DaysOf24HourSnapshots = 2 // Keep last 2 full days of daily timelapses (e.g., today and yesterday)
-	defer func() { config.AppConfig.DaysOf24HourSnapshots = originalDaysOf24HourSnapshots }()
+	settings.Set("video.daily_days", "2")
+	settings.Invalidate()
 
 	today := time.Now().Truncate(24 * time.Hour)
 	yesterday := today.AddDate(0, 0, -1)
@@ -272,13 +266,16 @@ func TestCleanOldVideos(t *testing.T) {
 	assert.Len(t, files, 3)
 
 	// --- Test calendar-week timelapse cleanup ---
-	originalWeeklyLapsesToKeep := config.AppConfig.WeeklyLapsesToKeep
-	config.AppConfig.WeeklyLapsesToKeep = 1
-	defer func() { config.AppConfig.WeeklyLapsesToKeep = originalWeeklyLapsesToKeep }()
+	settings.Set("video.weekly_keep", "1")
+	settings.Invalidate()
 
-	// Create 3 weekly videos; alphabetical sort == chronological, so newest is "2026-05-11"
-	for _, monday := range []string{"2026-04-27", "2026-05-04", "2026-05-11"} {
-		filename := fmt.Sprintf("timelapse_week_%s.webm", monday)
+	// Use dates relative to today's Monday so the test never breaks on week rollover.
+	thisMonday := calendarWeekMonday(time.Now())
+	lastMonday := thisMonday.AddDate(0, 0, -7)
+	twoWeeksAgo := thisMonday.AddDate(0, 0, -14)
+
+	for _, monday := range []time.Time{twoWeeksAgo, lastMonday, thisMonday} {
+		filename := fmt.Sprintf("timelapse_week_%s.webm", monday.Format("2006-01-02"))
 		os.WriteFile(filepath.Join(tempDir, filename), []byte("dummy"), 0644)
 	}
 
@@ -286,7 +283,7 @@ func TestCleanOldVideos(t *testing.T) {
 
 	filesWeek, _ := filepath.Glob(filepath.Join(tempDir, "timelapse_week_*.webm"))
 	assert.Len(t, filesWeek, 1, "should keep only 1 weekly timelapse")
-	assert.Contains(t, filesWeek, filepath.Join(tempDir, "timelapse_week_2026-05-11.webm"), "should keep the newest week")
+	assert.Contains(t, filesWeek, filepath.Join(tempDir, fmt.Sprintf("timelapse_week_%s.webm", thisMonday.Format("2006-01-02"))), "should keep the current week")
 }
 
 func TestCleanupLogFiles(t *testing.T) {
@@ -320,9 +317,8 @@ func TestCleanupGallery(t *testing.T) {
 	defer func() { config.AppConfig.GalleryDir = originalGalleryDir }()
 
 	// Set a specific retention period for this test
-	originalRetentionDays := config.AppConfig.GalleryRetentionDays
-	config.AppConfig.GalleryRetentionDays = 1
-	defer func() { config.AppConfig.GalleryRetentionDays = originalRetentionDays }()
+	settings.Set("gallery.retention_days", "1")
+	settings.Invalidate()
 
 	// Create an old file that should be deleted
 	oldTime := time.Now().Add(-2 * 24 * time.Hour)
@@ -355,17 +351,12 @@ func TestEnqueueTimelapseJobs(t *testing.T) {
 		return 1, nil
 	}
 
-	originalDaysOf24HourSnapshots := config.AppConfig.DaysOf24HourSnapshots
-	originalWeeklyLapsesToKeep := config.AppConfig.WeeklyLapsesToKeep
-	originalMonthlyLapsesToKeep := config.AppConfig.MonthlyLapsesToKeep
-	config.AppConfig.DaysOf24HourSnapshots = 2
-	config.AppConfig.WeeklyLapsesToKeep = 2
-	config.AppConfig.MonthlyLapsesToKeep = 1
-	defer func() {
-		config.AppConfig.DaysOf24HourSnapshots = originalDaysOf24HourSnapshots
-		config.AppConfig.WeeklyLapsesToKeep = originalWeeklyLapsesToKeep
-		config.AppConfig.MonthlyLapsesToKeep = originalMonthlyLapsesToKeep
-	}()
+	_, cleanup2 := setupTest(t)
+	defer cleanup2()
+	settings.Set("video.daily_days", "2")
+	settings.Set("video.weekly_keep", "2")
+	settings.Set("video.monthly_keep", "1")
+	settings.Invalidate()
 
 	EnqueueTimelapseJobs()
 
@@ -516,24 +507,14 @@ func setupGalleryFiles(t *testing.T, galleryDir string, start time.Time, days in
 }
 
 func TestFilterSnapshots_CalendarWindow(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "gallery-filter-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+	tempDir, cleanup := setupTest(t)
+	defer cleanup()
 
-	originalGalleryDir := config.AppConfig.GalleryDir
-	originalDaylightStart := config.AppConfig.DaylightStartHour
-	originalDaylightEnd := config.AppConfig.DaylightEndHour
-	originalDaylightTarget := config.AppConfig.DaylightTargetHour
 	config.AppConfig.GalleryDir = filepath.Join(tempDir, "gallery")
-	config.AppConfig.DaylightStartHour = 0
-	config.AppConfig.DaylightEndHour = 24
-	config.AppConfig.DaylightTargetHour = 12
-	defer func() {
-		config.AppConfig.GalleryDir = originalGalleryDir
-		config.AppConfig.DaylightStartHour = originalDaylightStart
-		config.AppConfig.DaylightEndHour = originalDaylightEnd
-		config.AppConfig.DaylightTargetHour = originalDaylightTarget
-	}()
+	settings.Set("video.daylight_start_hour", "0")
+	settings.Set("video.daylight_end_hour", "24")
+	settings.Set("video.daylight_target_hour", "12")
+	settings.Invalidate()
 
 	monday := time.Date(2026, 5, 11, 0, 0, 0, 0, time.UTC)
 	setupGalleryFiles(t, config.AppConfig.GalleryDir, monday, 7) // Mon–Sun
@@ -553,24 +534,14 @@ func TestFilterSnapshots_CalendarWindow(t *testing.T) {
 }
 
 func TestFilterSnapshots_DaylightFilter(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "daylight-filter-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+	tempDir, cleanup := setupTest(t)
+	defer cleanup()
 
-	originalGalleryDir := config.AppConfig.GalleryDir
-	originalDaylightStart := config.AppConfig.DaylightStartHour
-	originalDaylightEnd := config.AppConfig.DaylightEndHour
-	originalDaylightTarget := config.AppConfig.DaylightTargetHour
 	config.AppConfig.GalleryDir = filepath.Join(tempDir, "gallery")
-	config.AppConfig.DaylightStartHour = 7
-	config.AppConfig.DaylightEndHour = 19
-	config.AppConfig.DaylightTargetHour = 12
-	defer func() {
-		config.AppConfig.GalleryDir = originalGalleryDir
-		config.AppConfig.DaylightStartHour = originalDaylightStart
-		config.AppConfig.DaylightEndHour = originalDaylightEnd
-		config.AppConfig.DaylightTargetHour = originalDaylightTarget
-	}()
+	settings.Set("video.daylight_start_hour", "7")
+	settings.Set("video.daylight_end_hour", "19")
+	settings.Set("video.daylight_target_hour", "12")
+	settings.Invalidate()
 
 	monday := time.Date(2026, 5, 11, 0, 0, 0, 0, time.UTC)
 	setupGalleryFiles(t, config.AppConfig.GalleryDir, monday, 3)
@@ -594,21 +565,13 @@ func TestFilterSnapshots_DaylightFilter(t *testing.T) {
 }
 
 func TestFilterSnapshots_3Hourly(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "3hourly-filter-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+	tempDir, cleanup := setupTest(t)
+	defer cleanup()
 
-	originalGalleryDir := config.AppConfig.GalleryDir
-	originalDaylightStart := config.AppConfig.DaylightStartHour
-	originalDaylightEnd := config.AppConfig.DaylightEndHour
 	config.AppConfig.GalleryDir = filepath.Join(tempDir, "gallery")
-	config.AppConfig.DaylightStartHour = 7
-	config.AppConfig.DaylightEndHour = 19
-	defer func() {
-		config.AppConfig.GalleryDir = originalGalleryDir
-		config.AppConfig.DaylightStartHour = originalDaylightStart
-		config.AppConfig.DaylightEndHour = originalDaylightEnd
-	}()
+	settings.Set("video.daylight_start_hour", "7")
+	settings.Set("video.daylight_end_hour", "19")
+	settings.Invalidate()
 
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	setupGalleryFiles(t, config.AppConfig.GalleryDir, start, 2)
@@ -626,24 +589,14 @@ func TestFilterSnapshots_3Hourly(t *testing.T) {
 }
 
 func TestFilterSnapshots_MonthlyNoonPicking(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "noon-picking-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+	tempDir, cleanup := setupTest(t)
+	defer cleanup()
 
-	originalGalleryDir := config.AppConfig.GalleryDir
-	originalDaylightStart := config.AppConfig.DaylightStartHour
-	originalDaylightEnd := config.AppConfig.DaylightEndHour
-	originalDaylightTarget := config.AppConfig.DaylightTargetHour
 	config.AppConfig.GalleryDir = filepath.Join(tempDir, "gallery")
-	config.AppConfig.DaylightStartHour = 7
-	config.AppConfig.DaylightEndHour = 19
-	config.AppConfig.DaylightTargetHour = 12
-	defer func() {
-		config.AppConfig.GalleryDir = originalGalleryDir
-		config.AppConfig.DaylightStartHour = originalDaylightStart
-		config.AppConfig.DaylightEndHour = originalDaylightEnd
-		config.AppConfig.DaylightTargetHour = originalDaylightTarget
-	}()
+	settings.Set("video.daylight_start_hour", "7")
+	settings.Set("video.daylight_end_hour", "19")
+	settings.Set("video.daylight_target_hour", "12")
+	settings.Invalidate()
 
 	// Create 3 days of gallery images
 	monthStart := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
@@ -669,21 +622,18 @@ func TestFilterSnapshots_MonthlyNoonPicking(t *testing.T) {
 
 func setupCalendarTest(t *testing.T) (string, func()) {
 	t.Helper()
-	tempDir, err := os.MkdirTemp("", "calendar-timelapse-test")
-	assert.NoError(t, err)
+	tempDir, cleanup := setupTest(t)
 
-	config.AppConfig.DataDir = tempDir
-	config.AppConfig.SnapshotsDir = filepath.Join(tempDir, "snapshots")
 	config.AppConfig.GalleryDir = filepath.Join(tempDir, "gallery")
-	config.AppConfig.DaylightStartHour = 7
-	config.AppConfig.DaylightEndHour = 19
-	config.AppConfig.DaylightTargetHour = 12
-	config.AppConfig.WeeklyLapsesToKeep = 4
-	config.AppConfig.MonthlyLapsesToKeep = 3
-	os.MkdirAll(config.AppConfig.SnapshotsDir, 0755)
 	os.MkdirAll(config.AppConfig.GalleryDir, 0755)
+	settings.Set("video.daylight_start_hour", "7")
+	settings.Set("video.daylight_end_hour", "19")
+	settings.Set("video.daylight_target_hour", "12")
+	settings.Set("video.weekly_keep", "4")
+	settings.Set("video.monthly_keep", "3")
+	settings.Invalidate()
 
-	return tempDir, func() { os.RemoveAll(tempDir) }
+	return tempDir, cleanup
 }
 
 func mockVideoFunctions(t *testing.T) (called *bool, restore func()) {
@@ -787,9 +737,8 @@ func TestCleanOldVideos_Monthly(t *testing.T) {
 	tempDir, cleanup := setupTest(t)
 	defer cleanup()
 
-	originalMonthlyLapsesToKeep := config.AppConfig.MonthlyLapsesToKeep
-	config.AppConfig.MonthlyLapsesToKeep = 2
-	defer func() { config.AppConfig.MonthlyLapsesToKeep = originalMonthlyLapsesToKeep }()
+	settings.Set("video.monthly_keep", "2")
+	settings.Invalidate()
 
 	for _, month := range []string{"2026-02", "2026-03", "2026-04", "2026-05"} {
 		os.WriteFile(filepath.Join(tempDir, "timelapse_month_"+month+".webm"), []byte("x"), 0644)

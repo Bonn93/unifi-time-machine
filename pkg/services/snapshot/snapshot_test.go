@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"time-machine/pkg/config"
+	"time-machine/pkg/database"
+	"time-machine/pkg/services/settings"
 )
 
 var mockServer *httptest.Server
@@ -40,26 +42,34 @@ func teardownMockServer() {
 	mockServer.Close()
 }
 
+func setupTestDB(t *testing.T) {
+	t.Helper()
+	config.AppConfig.DataDir = t.TempDir()
+	database.InitDB()
+	settings.Init()
+}
+
 func TestInitSnapshotSettings(t *testing.T) {
 	setupMockServer()
 	defer teardownMockServer()
+	setupTestDB(t)
 
 	config.AppConfig.UFPHost = mockServer.URL
 	config.AppConfig.UFPAPIKey = "test-key"
 	config.AppConfig.TargetCameraID = "test-cam"
 
-	// Test "auto"
-	config.AppConfig.HQSnapParams = "auto"
+	// Test "auto" — mock server returns supportFullHdSnapshot=true
+	settings.Set("snapshot.hq_params", "auto")
 	InitSnapshotSettings()
 	assert.True(t, useHighQuality)
 
 	// Test "true"
-	config.AppConfig.HQSnapParams = "true"
+	settings.Set("snapshot.hq_params", "true")
 	InitSnapshotSettings()
 	assert.True(t, useHighQuality)
 
 	// Test "false"
-	config.AppConfig.HQSnapParams = "false"
+	settings.Set("snapshot.hq_params", "false")
 	InitSnapshotSettings()
 	assert.False(t, useHighQuality)
 }
@@ -81,19 +91,14 @@ func TestTakeSnapshot(t *testing.T) {
 	useHighQuality = true
 	TakeSnapshot()
 
-	// Check if snapshot was created
 	now := time.Now()
 	snapshotDir := filepath.Join(config.AppConfig.SnapshotsDir, now.Format("2006-01"), now.Format("02"), now.Format("15"))
-
-	// Due to timing issues, we'll check if the directory was created, not the exact file
 	assert.DirExists(t, snapshotDir)
 
-	// Check if gallery image was created
 	galleryFileName := now.Format("2006-01-02-15") + ".jpg"
 	galleryPath := filepath.Join(config.AppConfig.GalleryDir, galleryFileName)
 	assert.FileExists(t, galleryPath)
 
-	// Check if latest snapshot was created
 	latestPath := filepath.Join(config.AppConfig.DataDir, "latest_snapshot.jpg")
 	assert.FileExists(t, latestPath)
 }

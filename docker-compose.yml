@@ -1,16 +1,12 @@
 version: '3.8'
 
-# This Docker Compose file provides an example of how to run the
-# unifi-time-machine application.
+# UniFi Time Machine — Docker Compose
 #
-# Before you start, you MUST replace the placeholder values for:
-# - UFP_API_KEY
-# - TARGET_CAMERA_ID
-# - APP_KEY
-# - ADMIN_PASSWORD
+# Replace the four IMPORTANT values below, then run:
+#   docker compose up -d
 #
-# You can start the application by running:
-# docker-compose up -d
+# All other settings (video format, quality, retention, etc.) are configured
+# at runtime via Admin → Settings in the web UI — no restart required.
 
 services:
   unifi-time-machine:
@@ -18,73 +14,27 @@ services:
     container_name: unifi-time-machine
     restart: unless-stopped
     ports:
-      # Exposes the web UI on port 8000 of the host machine.
-      # Format: "HOST_PORT:CONTAINER_PORT"
       - "8000:8080"
     volumes:
-      # Mounts the local 'data' directory into the container for persistent storage.
       - ./data:/app/data
     environment:
-      # --- General Settings ---
       TZ: 'Australia/Sydney'
-      GIN_MODE: 'release' # Set to 'debug' for development logging.
+      GIN_MODE: 'release'
 
-      # --- UniFi Protect Integration ---
-      # The IP address or hostname of your UniFi Protect controller.
-      UFP_HOST: '192.168.1.1'
-      # The API key from your UniFi Protect user account.
-      UFP_API_KEY: 'your_api_key_here' # IMPORTANT: Replace with your actual API key
-      # The ID of the camera you want to capture snapshots from.
-      TARGET_CAMERA_ID: 'your_camera_id_here' # IMPORTANT: Replace with your camera ID
+      # --- UniFi Protect (required) ---
+      UFP_HOST: '192.168.1.1'                      # IP / hostname of your Protect controller
+      UFP_API_KEY: 'your_api_key_here'              # IMPORTANT: API key from Protect user settings
+      TARGET_CAMERA_ID: 'your_camera_id_here'       # IMPORTANT: Camera ID from the Protect URL
 
-      # --- Authentication ---
-      # A mandatory, base64-encoded secret key for application security.
-      # Generate one with: head -c 32 /dev/urandom | base64
-      APP_KEY: 'your_random_base64_key_here' # IMPORTANT: Replace with a generated key
-      # The password for the initial 'admin' user, created on first launch.
-      ADMIN_PASSWORD: 'your_secure_password_here' # IMPORTANT: Change this
+      # --- Authentication (required) ---
+      APP_KEY: 'your_random_base64_key_here'        # IMPORTANT: generate with: head -c 32 /dev/urandom | base64
+      ADMIN_PASSWORD: 'your_secure_password_here'   # IMPORTANT: initial admin password
 
-      # --- Snapshot & Video Generation ---
-      # The interval, in seconds, between each snapshot. Default is 3600 (1 hour).
-      TIMELAPSE_INTERVAL: '3600'
-      # How often, in seconds, to check for and generate new timelapse videos. Default is 300 (5 mins).
-      VIDEO_CRON_INTERVAL: '300'
-      # Video quality setting. Options: low, medium, high, ultra.
-      VIDEO_QUALITY: 'ultra'
-      # Whether to use high-quality snapshots. Options: true, false, auto.
-      HQSNAP: 'auto'
-
-      # --- Formatting Settings ---
-      # The format for displaying dates (e.g. DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD)
-      DATE_FORMAT: 'DD/MM/YYYY'
-      # The format for displaying times (e.g. 12h, 24h)
-      TIME_FORMAT: '12h'
-
-      # --- Daylight Filtering ---
-      # Only images taken within this hour range are used in weekly, monthly, and yearly timelapses.
-      # 24-hour daily timelapses are unaffected and always include all hours.
-      DAYLIGHT_START_HOUR: '7'
-      DAYLIGHT_END_HOUR: '19'
-      # Target hour (0–23) used to pick the best image for each day in monthly timelapses.
-      DAYLIGHT_TARGET_HOUR: '12'
-
-      # --- Timelapse Retention ---
-      # Number of calendar-week timelapses to keep (one per Monday).
-      WEEKLY_LAPSES_TO_KEEP: '4'
-      # Number of calendar-month timelapses to keep.
-      MONTHLY_LAPSES_TO_KEEP: '3'
-
-      # --- Data Retention & Cleanup ---
-      # The number of days of 24-hour daily timelapses to generate and keep.
-      DAYS_OF_24_HOUR_SNAPSHOTS: '30'
-      # The number of days to retain individual snapshots.
-      SNAPSHOT_RETENTION_DAYS: '30'
-      # The number of days to retain gallery images. Defaults to a high value.
-      GALLERY_RETENTION_DAYS: '365'
-      # The number of hours a shared link is valid for. Set to 0 for unlimited.
-      SHARE_LINK_EXPIRY_HOURS: '4'
-      
-      # --- Directory Settings (Advanced) ---
-      # These point to directories inside the container. It's not recommended to change these.
-      SNAPSHOTS_DIR: 'snapshots'
-      GALLERY_DIR: 'gallery'
+      # --- Optional: seed initial settings (first launch only, ignored after) ---
+      # These set the starting values in the database on the very first run.
+      # Remove or leave commented after initial setup — use Admin → Settings instead.
+      #
+      # VIDEO_FORMAT: 'hls'           # webm (AV1) | mp4 (H.264) | hls (adaptive, recommended)
+      # VIDEO_QUALITY: 'high'         # low | medium | high | ultra
+      # TIMELAPSE_INTERVAL: '3600'    # seconds between snapshots (default: 3600 = 1 hour)
+      # HQSNAP: 'auto'                # auto | true | false

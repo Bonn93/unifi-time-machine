@@ -8,7 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"time-machine/pkg/auth"
-	"time-machine/pkg/config"
 	"time-machine/pkg/handlers"
 )
 
@@ -44,8 +43,8 @@ func SetupRouter() *gin.Engine {
 		// Dashboard
 		authorized.GET("/", handlers.HandleDashboard)
 
-		// Static Files
-		authorized.Static("/data", config.AppConfig.DataDir)
+		// Static data files — custom handler sets MIME types for HLS .m3u8 and .ts
+		authorized.GET("/data/*filepath", handlers.HandleDataFile)
 
 		// Actions
 		authorized.GET("/log", handlers.HandleLog)
@@ -60,10 +59,11 @@ func SetupRouter() *gin.Engine {
 		adminRoutes.Use(auth.AdminOnlyMiddleware())
 		{
 			adminRoutes.POST("/force-generate", handlers.HandleForceGenerate)
-			adminRoutes.GET("/admin", handlers.HandleAdminPage) // Note: removed trailing slash for consistency
+			adminRoutes.GET("/admin", handlers.HandleAdminPage)
 			adminRoutes.POST("/admin/users", handlers.HandleCreateUser)
 			adminRoutes.POST("/admin/users/delete", handlers.HandleDeleteUser)
 			adminRoutes.POST("/admin/users/password", handlers.HandleChangePassword)
+			adminRoutes.POST("/admin/settings", handlers.HandleSaveSettings)
 			adminRoutes.POST("/share", handlers.HandleShareLink)
 		}
 		// Logout endpoint (authenticated)
