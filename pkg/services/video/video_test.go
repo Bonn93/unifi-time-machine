@@ -269,9 +269,13 @@ func TestCleanOldVideos(t *testing.T) {
 	settings.Set("video.weekly_keep", "1")
 	settings.Invalidate()
 
-	// Create 3 weekly videos; alphabetical sort == chronological, so newest is "2026-05-11"
-	for _, monday := range []string{"2026-04-27", "2026-05-04", "2026-05-11"} {
-		filename := fmt.Sprintf("timelapse_week_%s.webm", monday)
+	// Use dates relative to today's Monday so the test never breaks on week rollover.
+	thisMonday := calendarWeekMonday(time.Now())
+	lastMonday := thisMonday.AddDate(0, 0, -7)
+	twoWeeksAgo := thisMonday.AddDate(0, 0, -14)
+
+	for _, monday := range []time.Time{twoWeeksAgo, lastMonday, thisMonday} {
+		filename := fmt.Sprintf("timelapse_week_%s.webm", monday.Format("2006-01-02"))
 		os.WriteFile(filepath.Join(tempDir, filename), []byte("dummy"), 0644)
 	}
 
@@ -279,7 +283,7 @@ func TestCleanOldVideos(t *testing.T) {
 
 	filesWeek, _ := filepath.Glob(filepath.Join(tempDir, "timelapse_week_*.webm"))
 	assert.Len(t, filesWeek, 1, "should keep only 1 weekly timelapse")
-	assert.Contains(t, filesWeek, filepath.Join(tempDir, "timelapse_week_2026-05-11.webm"), "should keep the newest week")
+	assert.Contains(t, filesWeek, filepath.Join(tempDir, fmt.Sprintf("timelapse_week_%s.webm", thisMonday.Format("2006-01-02"))), "should keep the current week")
 }
 
 func TestCleanupLogFiles(t *testing.T) {
