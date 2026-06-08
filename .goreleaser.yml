@@ -26,7 +26,8 @@ changelog:
     - title: Other Changes
       order: 999
 
-# GitHub Release — attaches RELEASE_NOTES.txt as a downloadable asset.
+# GitHub Release — RELEASE_NOTES.txt is attached as a downloadable asset.
+# The release body is the auto-generated git changelog above.
 release:
   extra_files:
     - glob: RELEASE_NOTES.txt

@@ -115,9 +115,57 @@ hr {
     font-size: 0.9rem;
 }
 
-video {
+/* Video.js player theming to match dark UI */
+.video-js {
+    width: 100%;
+    border-radius: 0.375rem;
+    overflow: hidden;
     border: 1px solid var(--border-color);
     background-color: #000;
+    /* Fluid sizing: fills card width, caps height at 450px */
+    max-height: 450px;
+}
+/* Override fluid padding-box approach so max-height works */
+.video-js.vjs-fluid:not(.vjs-fullscreen),
+.video-js.vjs-16-9:not(.vjs-fullscreen) {
+    padding-top: 0 !important;
+    height: min(56.25vw, 450px);
+}
+.vjs-big-play-button {
+    border: 2px solid rgba(255,255,255,0.7) !important;
+    background-color: rgba(0,0,0,0.55) !important;
+    border-radius: 50% !important;
+    width: 60px !important;
+    height: 60px !important;
+    line-height: 58px !important;
+    top: 50% !important;
+    left: 50% !important;
+    margin-top: -30px !important;
+    margin-left: -30px !important;
+    font-size: 1.8em !important;
+}
+.vjs-big-play-button:hover {
+    background-color: rgba(13,110,253,0.7) !important;
+    border-color: #fff !important;
+}
+.video-js .vjs-control-bar {
+    background-color: rgba(0,0,0,0.82);
+    height: 3em;
+}
+.video-js .vjs-play-progress,
+.video-js .vjs-volume-level {
+    background-color: var(--bs-blue);
+}
+.video-js .vjs-play-progress:before {
+    color: var(--bs-blue);
+}
+.video-js .vjs-load-progress div {
+    background: rgba(255,255,255,0.15);
+}
+/* Quality selector button label */
+.vjs-hls-quality-selector .vjs-icon-placeholder:before {
+    font-size: 1.4em;
+    line-height: 2.2;
 }
 
 pre {

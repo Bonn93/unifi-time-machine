@@ -37,7 +37,18 @@
             font-weight: 500;
             border-bottom: 1px solid var(--border-color);
         }
+        .settings-section-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.4rem;
+            margin-bottom: 0.5rem;
+        }
         .form-label { font-weight: 500; }
+        .form-text { font-size: 0.78rem; line-height: 1.4; }
         .form-control, .form-check-input {
             background-color: #2a2a2a;
             color: var(--text-primary);
@@ -52,8 +63,10 @@
         .btn-primary { background-color: var(--bs-blue); border-color: var(--bs-blue); }
         .message.success { color: var(--bs-green); }
         .message.error { color: var(--bs-red); }
-        .alert-success { background-color: var(--bs-green); border-color: var(--bs-green); color: #fff; }
-        .alert-danger { background-color: var(--bs-red); border-color: var(--bs-red); color: #fff; }
+        .alert-success { background-color: #0f3d22; border-color: #198754; color: #75d79f; }
+        .alert-danger  { background-color: #3d0f0f; border-color: #dc3545; color: #f4a0a8; }
+        .alert-warning { background-color: #3d2a00; border-color: #ffc107; color: #ffd966; }
+        #formatChangeWarning { display: none; }
     </style>
 </head>
 <body>
@@ -67,9 +80,10 @@
                 </a>
             </div>
         </div>
-        <p class="text-secondary">Manage user accounts.</p>
+        <p class="text-secondary">Manage user accounts and application settings.</p>
         <hr>
 
+        <!-- Create User Card -->
         <div class="card">
             <div class="card-header"><i class="fas fa-user-plus me-2"></i>Create New User</div>
             <div class="card-body">
@@ -97,6 +111,7 @@
             </div>
         </div>
 
+        <!-- Existing Users Card -->
         <div class="card mt-4">
             <div class="card-header"><i class="fas fa-users me-2"></i>Existing Users</div>
             <div class="card-body">
@@ -140,7 +155,250 @@
                 </table>
             </div>
         </div>
-    </div>
+
+        <!-- Video & System Settings Card -->
+        {{ if .Settings }}
+        <div class="card mt-4">
+            <div class="card-header"><i class="fas fa-sliders me-2"></i>Video &amp; System Settings</div>
+            <div class="card-body">
+
+                {{ if .SettingsSuccess }}
+                <div class="alert alert-success mb-3"><i class="fas fa-check-circle me-2"></i>{{ .SettingsSuccess }}</div>
+                {{ end }}
+
+                <!-- Static format-change warning -->
+                <div class="alert alert-warning mb-4">
+                    <strong><i class="fas fa-triangle-exclamation me-2"></i>Output Format Changes Are CPU-Intensive</strong>
+                    <p class="mb-0 mt-1" style="font-size:0.88rem;">
+                        Changing the <strong>Output Format</strong> below will trigger a full re-encode of every timelapse on the next scheduled video run.
+                        Depending on the number of timelapses and your hardware, this can take several minutes to hours and will significantly
+                        load the CPU. Existing files in the old format are kept until the new format is confirmed.
+                        Avoid changing format repeatedly in a short period.
+                    </p>
+                </div>
+
+                <!-- Dynamic warning shown when format dropdown is changed -->
+                <div class="alert alert-warning mb-3" id="formatChangeWarning">
+                    <i class="fas fa-triangle-exclamation me-2"></i>
+                    <strong>Format change detected.</strong> All timelapses will be re-encoded after you save. This will queue immediately and run in the background.
+                </div>
+
+                <form action="/admin/settings" method="POST">
+
+                    <!-- ── Video Output ────────────────────────────────── -->
+                    <p class="settings-section-label mt-2"><i class="fas fa-film me-1"></i> Video Output</p>
+                    <div class="row g-3">
+
+                        <div class="col-md-6">
+                            <label class="form-label">Output Format</label>
+                            <select class="form-control" name="video.format" id="videoFormat" onchange="onFormatChange()">
+                                <option value="webm" {{ if eq (index .Settings "video.format") "webm" }}selected{{ end }}>WebM / AV1</option>
+                                <option value="mp4"  {{ if eq (index .Settings "video.format") "mp4"  }}selected{{ end }}>MP4 / H.264</option>
+                                <option value="hls"  {{ if eq (index .Settings "video.format") "hls"  }}selected{{ end }}>HLS / H.264 (adaptive streaming)</option>
+                            </select>
+                            <div class="form-text text-secondary">
+                                <strong>WebM/AV1</strong> produces the smallest files but requires software decoding on most phones and older devices, which can cause buffering.
+                                <strong>MP4/H.264</strong> uses universal hardware decoding — smooth on all devices, slightly larger files.
+                                <strong>HLS/H.264</strong> is the best choice for mobile and remote viewing: it streams in short segments so playback starts immediately, and it adapts quality to your connection speed.
+                            </div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Video Quality</label>
+                            <select class="form-control" name="video.quality">
+                                <option value="low"    {{ if eq (index .Settings "video.quality") "low"    }}selected{{ end }}>Low</option>
+                                <option value="medium" {{ if eq (index .Settings "video.quality") "medium" }}selected{{ end }}>Medium (recommended)</option>
+                                <option value="high"   {{ if eq (index .Settings "video.quality") "high"   }}selected{{ end }}>High</option>
+                                <option value="ultra"  {{ if eq (index .Settings "video.quality") "ultra"  }}selected{{ end }}>Ultra</option>
+                            </select>
+                            <div class="form-text text-secondary">
+                                Sets the CRF (Constant Rate Factor) — the encoder's quality target. Lower CRF = sharper image, larger files, longer encode.
+                                <strong>Low</strong> = CRF 35 (small files), <strong>Medium</strong> = CRF 28 (balanced), <strong>High</strong> = CRF 20 (sharp), <strong>Ultra</strong> = CRF 15 (near-lossless).
+                                For HLS, lower quality levels use a slightly higher CRF automatically: 720p adds +2, 480p adds +4 to the base — so they stay proportionally smaller without a separate quality setting.
+                                <strong>Medium</strong> is a good default for timelapse content from most cameras. Use <strong>High</strong> for 4K/G6 sources where detail matters.
+                            </div>
+                        </div>
+
+                        <div class="col-md-4" id="maxBitrateField">
+                            <label class="form-label">Max Bitrate <span class="badge bg-secondary ms-1" style="font-size:0.65rem;">WebM / MP4 only</span></label>
+                            <input type="text" class="form-control" name="video.max_bitrate" value="{{ index .Settings "video.max_bitrate" }}" placeholder="e.g. 2M">
+                            <div class="form-text text-secondary">
+                                Hard ceiling on the encoded bitrate for <strong>WebM and MP4</strong> output (e.g. <code>2M</code> = 2 Mbps, <code>4M</code> = 4 Mbps).
+                                CRF controls average quality; this cap prevents spikes during complex scenes. <strong>2M–4M</strong> suits most setups.
+                                <br><em>Not used for HLS</em> — each HLS quality level has its own automatic ceiling based on its resolution (source: 16M, 1080p: 12M, 720p: 6M, 480p: 4M), so CRF drives quality without a global cap crushing 4K detail.
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Encoder Preset</label>
+                            <select class="form-control" name="video.encoder_preset">
+                                <option value="fast"   {{ if eq (index .Settings "video.encoder_preset") "fast"   }}selected{{ end }}>Fast (recommended for low-power)</option>
+                                <option value="medium" {{ if eq (index .Settings "video.encoder_preset") "medium" }}selected{{ end }}>Medium</option>
+                                <option value="slow"   {{ if eq (index .Settings "video.encoder_preset") "slow"   }}selected{{ end }}>Slow (best compression)</option>
+                            </select>
+                            <div class="form-text text-secondary">
+                                Controls the speed vs compression efficiency tradeoff. <strong>Fast</strong> finishes quickly using more CPU cycles per second but less total time — ideal for Raspberry Pi or NAS devices.
+                                <strong>Slow</strong> achieves smaller file sizes at the same quality level but can take 3–5× longer to encode.
+                                Unless your hardware is powerful, keep this on <strong>Fast</strong>.
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">FFmpeg Threads</label>
+                            <input type="number" class="form-control" name="video.ffmpeg_threads" value="{{ index .Settings "video.ffmpeg_threads" }}" min="0" max="32">
+                            <div class="form-text text-secondary">
+                                Number of CPU threads FFmpeg may use per encode. <strong>0 (default) = auto-detect</strong>: uses all available cores, capped at 8.
+                                Set a lower value (e.g. <strong>2</strong> or <strong>4</strong>) to limit CPU usage and leave headroom for other processes.
+                                Raising this above the physical core count has no benefit and may slow encoding.
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Snapshot Interval (seconds)</label>
+                            <input type="number" class="form-control" name="snapshot.interval_sec" value="{{ index .Settings "snapshot.interval_sec" }}" min="60">
+                            <div class="form-text text-secondary">
+                                How often a new snapshot is captured from the camera. <strong>3600</strong> = one frame per hour, giving a 24-frame daily timelapse.
+                                Lower values produce smoother, longer timelapses but consume more disk space and camera bandwidth.
+                                Changes take effect on the next scheduler tick (within one interval).
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- ── HLS Settings (shown only when HLS selected) ── -->
+                    <div id="hlsFields">
+                        <p class="settings-section-label mt-4"><i class="fas fa-list me-1"></i> HLS Adaptive Streaming</p>
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">Segment Duration (seconds)</label>
+                                <input type="number" class="form-control" name="video.hls_segment_sec" value="{{ index .Settings "video.hls_segment_sec" }}" min="2" max="10">
+                                <div class="form-text text-secondary">
+                                    Each HLS stream is split into short segments of this duration. Shorter segments (2–4s) start playback faster;
+                                    longer segments (6–10s) reduce the number of files but delay initial playback.
+                                    <strong>4 seconds</strong> is the standard for on-demand (VOD) content.
+                                </div>
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label">Quality Levels (comma-separated)</label>
+                                <input type="text" class="form-control" name="video.hls_qualities" value="{{ index .Settings "video.hls_qualities" }}" placeholder="source,720p,480p">
+                                <div class="form-text text-secondary">
+                                    Comma-separated list of quality levels encoded into the adaptive HLS stream.
+                                    <strong>source</strong> = original camera resolution with no downscale (recommended — preserves 4K detail).
+                                    <strong>1080p / 720p / 480p</strong> = downscaled fallback variants the player switches to on slower connections.
+                                    The Video.js player shows a gear icon so viewers can lock to a specific level or leave it on Auto (ABR).
+                                    <br>
+                                    Each level has an <strong>automatic per-level bitrate ceiling</strong> — the global Max Bitrate setting is not used for HLS:
+                                    <code>source</code> → 16M cap, <code>1080p</code> → 12M, <code>720p</code> → 6M, <code>480p</code> → 4M.
+                                    These generous caps let CRF control average quality while still preventing runaway file sizes on complex frames.
+                                    All levels are encoded in a <strong>single FFmpeg pass</strong>, so adding more levels costs extra CPU time but not extra wall-clock time per level.
+                                    Example: <code>source,720p</code> (recommended for 4K cameras) or <code>source,1080p,720p,480p</code> (full ladder for variable connections).
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── Retention & Cleanup ────────────────────────── -->
+                    <p class="settings-section-label mt-4"><i class="fas fa-calendar me-1"></i> Timelapse Generation &amp; Retention</p>
+                    <div class="row g-3">
+
+                        <div class="col-md-4">
+                            <label class="form-label">Days of Daily Timelapses</label>
+                            <input type="number" class="form-control" name="video.daily_days" value="{{ index .Settings "video.daily_days" }}" min="1">
+                            <div class="form-text text-secondary">
+                                Number of calendar days for which a full 24-hour daily timelapse is generated and kept.
+                                Each daily timelapse includes every snapshot from midnight to midnight. Older ones beyond this limit are deleted automatically on the next cleanup run.
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Weekly Timelapses to Keep</label>
+                            <input type="number" class="form-control" name="video.weekly_keep" value="{{ index .Settings "video.weekly_keep" }}" min="1">
+                            <div class="form-text text-secondary">
+                                Number of Monday-to-Sunday weekly timelapses to retain. Each covers one calendar week using daylight-filtered frames only. Older weeks are pruned automatically.
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Monthly Timelapses to Keep</label>
+                            <input type="number" class="form-control" name="video.monthly_keep" value="{{ index .Settings "video.monthly_keep" }}" min="1">
+                            <div class="form-text text-secondary">
+                                Number of calendar-month timelapses to retain. Each month uses one representative frame per day (closest to the target hour). Older months are pruned automatically.
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Snapshot Retention (days)</label>
+                            <input type="number" class="form-control" name="snapshot.retention_days" value="{{ index .Settings "snapshot.retention_days" }}" min="1">
+                            <div class="form-text text-secondary">
+                                Individual snapshot images (.jpg files) are kept for this many days before deletion.
+                                Longer retention allows regenerating timelapses further into the past but uses proportionally more disk space.
+                                At one snapshot per hour, 30 days ≈ 720 images.
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Gallery Retention (days)</label>
+                            <input type="number" class="form-control" name="gallery.retention_days" value="{{ index .Settings "gallery.retention_days" }}" min="1">
+                            <div class="form-text text-secondary">
+                                Photos saved to the gallery are kept for this many days before automatic deletion.
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Share Link Expiry (hours)</label>
+                            <input type="number" class="form-control" name="share.link_expiry_hours" value="{{ index .Settings "share.link_expiry_hours" }}" min="0">
+                            <div class="form-text text-secondary">
+                                How long a publicly shareable link remains valid after creation. Set to <strong>0</strong> for links that never expire.
+                                Expired links return a 404 and are cleaned up automatically.
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- ── Daylight Filtering ─────────────────────────── -->
+                    <p class="settings-section-label mt-4"><i class="fas fa-sun me-1"></i> Daylight Filtering</p>
+                    <div class="row g-3">
+
+                        <div class="col-md-4">
+                            <label class="form-label">Daylight Start Hour (0–23)</label>
+                            <input type="number" class="form-control" name="video.daylight_start_hour" value="{{ index .Settings "video.daylight_start_hour" }}" min="0" max="23">
+                            <div class="form-text text-secondary">
+                                Frames captured before this hour (24h clock) are excluded from weekly, monthly, and yearly timelapses.
+                                Set to <strong>0</strong> to include all hours. The full 24-hour daily timelapse is always unaffected.
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Daylight End Hour (0–23)</label>
+                            <input type="number" class="form-control" name="video.daylight_end_hour" value="{{ index .Settings "video.daylight_end_hour" }}" min="0" max="23">
+                            <div class="form-text text-secondary">
+                                Frames captured after this hour are excluded from weekly, monthly, and yearly timelapses.
+                                Set to <strong>24</strong> (or match start hour) to disable filtering. Default: <strong>7</strong> to <strong>19</strong> covers typical daylight hours.
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Target Hour for Monthly Frame Picker</label>
+                            <input type="number" class="form-control" name="video.daylight_target_hour" value="{{ index .Settings "video.daylight_target_hour" }}" min="0" max="23">
+                            <div class="form-text text-secondary">
+                                When building a monthly timelapse, one representative frame is chosen per day.
+                                This setting picks the snapshot closest to this hour (e.g. <strong>12</strong> = noon).
+                                Choosing midday avoids shadows at the extremes of the day.
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <div class="mt-4">
+                        <button type="submit" class="btn btn-primary"><i class="fas fa-save me-2"></i>Save Settings</button>
+                        <span class="ms-3 text-secondary" style="font-size:0.85rem;">Settings are saved immediately. Timelapse regeneration is queued automatically if the output format changed.</span>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {{ end }}
+
+    </div><!-- /.container-fluid -->
 
     <!-- Change Password Modal -->
     <div class="modal fade" id="changePasswordModal" tabindex="-1" aria-labelledby="changePasswordModalLabel" aria-hidden="true">
@@ -174,13 +432,32 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
-        var changePasswordModal = document.getElementById('changePasswordModal')
+        // Modal: populate username
+        var changePasswordModal = document.getElementById('changePasswordModal');
         changePasswordModal.addEventListener('show.bs.modal', function (event) {
-            var button = event.relatedTarget
-            var username = button.getAttribute('data-username')
-            var modalUsernameInput = changePasswordModal.querySelector('#modalUsername')
-            modalUsernameInput.value = username
-        })
+            var button = event.relatedTarget;
+            var username = button.getAttribute('data-username');
+            changePasswordModal.querySelector('#modalUsername').value = username;
+        });
+
+        // Settings: toggle HLS-specific fields and show dynamic format-change warning
+        var originalFormat = document.getElementById('videoFormat') ? document.getElementById('videoFormat').value : null;
+
+        function onFormatChange() {
+            var fmt = document.getElementById('videoFormat').value;
+            document.getElementById('hlsFields').style.display = fmt === 'hls' ? 'block' : 'none';
+            // Max Bitrate is not used for HLS — each level has its own automatic cap
+            var maxBr = document.getElementById('maxBitrateField');
+            if (maxBr) maxBr.style.display = fmt === 'hls' ? 'none' : '';
+            var warn = document.getElementById('formatChangeWarning');
+            if (warn) {
+                warn.style.display = (fmt !== originalFormat) ? 'block' : 'none';
+            }
+        }
+
+        if (document.getElementById('videoFormat')) {
+            onFormatChange();
+        }
     </script>
 </body>
 </html>

@@ -1,0 +1,283 @@
+package video
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"time-machine/pkg/config"
+	"time-machine/pkg/database"
+	"time-machine/pkg/services/settings"
+)
+
+// HLSQuality describes a single quality level within an HLS stream.
+type HLSQuality struct {
+	Label      string // "source", "720p", "480p"
+	Height     int    // 0 = pass-through (source resolution)
+	CRF        int
+	Bandwidth  int    // approximate bps for the master playlist
+	MaxBitrate string // per-level hard cap passed to ffmpeg -maxrate
+	BufSize    string // corresponding -bufsize (2× MaxBitrate)
+}
+
+// hlsMaxBitrate returns the per-level ffmpeg -maxrate string: 2× the bandwidth
+// estimate, rounded up to the nearest Mbps. Source gets ~16M, 720p gets ~6M, etc.
+func hlsMaxBitrate(bw int) string {
+	mbps := (bw + 999_999) / 1_000_000 // ceil to nearest Mbps
+	if mbps < 1 {
+		mbps = 1
+	}
+	return fmt.Sprintf("%dM", mbps*2)
+}
+
+// parseHLSQualities converts a comma-separated quality string (e.g. "source,720p") into HLSQuality entries.
+func parseHLSQualities(raw string) []HLSQuality {
+	baseCRF := 23
+	if n, err := strconv.Atoi(settings.GetCRFForQuality(settings.Get("video.quality", "medium"))); err == nil {
+		baseCRF = n
+	}
+
+	heightFor := map[string]int{"source": 0, "1080p": 1080, "720p": 720, "480p": 480}
+	// Bandwidth estimates (bps) used in the master playlist and to derive per-level maxrate caps.
+	// source: 8 Mbps allows CRF to breathe on 4K content; downscaled levels scaled to resolution.
+	bwFor := map[string]int{"source": 8_000_000, "1080p": 6_000_000, "720p": 3_000_000, "480p": 1_200_000}
+	crfDelta := map[string]int{"source": 0, "1080p": 0, "720p": 2, "480p": 4}
+
+	var qualities []HLSQuality
+	for _, label := range strings.Split(raw, ",") {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			continue
+		}
+		bw := bwFor[label]
+		if bw == 0 {
+			bw = 4_000_000 // unknown label fallback
+		}
+		mr := hlsMaxBitrate(bw)
+		qualities = append(qualities, HLSQuality{
+			Label:      label,
+			Height:     heightFor[label],
+			CRF:        baseCRF + crfDelta[label],
+			Bandwidth:  bw,
+			MaxBitrate: mr,
+			BufSize:    computeBufSize(mr),
+		})
+	}
+	if len(qualities) == 0 {
+		qualities = []HLSQuality{{
+			Label: "source", Height: 0, CRF: baseCRF,
+			Bandwidth: 8_000_000, MaxBitrate: "16M", BufSize: "32M",
+		}}
+	}
+	return qualities
+}
+
+// firstFileInConcatList returns the path of the first 'file' entry in an ffmpeg
+// concat list, or an empty string if the file cannot be read or has no entries.
+func firstFileInConcatList(concatListPath string) string {
+	data, err := os.ReadFile(concatListPath)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "file ") {
+			return strings.Trim(strings.TrimPrefix(line, "file "), "'")
+		}
+	}
+	return ""
+}
+
+// probeVideoDimensions runs ffprobe on a file and returns its first video stream's
+// width and height. Returns (0, 0) on any error so callers can fall back gracefully.
+func probeVideoDimensions(filePath string) (int, int) {
+	out, err := exec.Command("ffprobe",
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=width,height",
+		"-of", "csv=p=0",
+		filePath,
+	).Output()
+	if err != nil {
+		return 0, 0
+	}
+	parts := strings.SplitN(strings.TrimSpace(string(out)), ",", 2)
+	if len(parts) != 2 {
+		return 0, 0
+	}
+	w, err1 := strconv.Atoi(parts[0])
+	h, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil || w <= 0 || h <= 0 {
+		return 0, 0
+	}
+	return w, h
+}
+
+// generateHLS encodes all quality levels in one FFmpeg pass using filter_complex.
+// Segments land in {DataDir}/hls/timelapse_{name}/{label}/ and a master.m3u8 is written.
+func generateHLS(name, concatListPath string, qualities []HLSQuality) error {
+	dataDir := config.AppConfig.DataDir
+	hlsDir := filepath.Join(dataDir, "hls", "timelapse_"+name)
+
+	if err := os.MkdirAll(hlsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create HLS dir: %w", err)
+	}
+	for _, q := range qualities {
+		if err := os.MkdirAll(filepath.Join(hlsDir, q.Label), 0755); err != nil {
+			return fmt.Errorf("failed to create quality dir %s: %w", q.Label, err)
+		}
+	}
+
+	segSec := settings.GetInt("video.hls_segment_sec", 4)
+	preset := settings.Get("video.encoder_preset", "fast")
+
+	args := []string{
+		"-hide_banner", "-loglevel", "error",
+		"-f", "concat", "-safe", "0", "-i", concatListPath,
+		"-threads", fmt.Sprintf("%d", getFFmpegThreads()),
+	}
+
+	if len(qualities) > 1 {
+		// Build filter_complex: split into N, then scale each non-source stream
+		splitExpr := fmt.Sprintf("[0:v]split=%d", len(qualities))
+		for i := range qualities {
+			splitExpr += fmt.Sprintf("[v%d]", i)
+		}
+		var scaleParts []string
+		scaleParts = append(scaleParts, splitExpr)
+		for i, q := range qualities {
+			if q.Height > 0 {
+				scaleParts = append(scaleParts, fmt.Sprintf("[v%d]scale=-2:%d[s%d]", i, q.Height, i))
+			} else {
+				scaleParts = append(scaleParts, fmt.Sprintf("[v%d]null[s%d]", i, i))
+			}
+		}
+		args = append(args, "-filter_complex", strings.Join(scaleParts, "; "))
+	}
+
+	for i, q := range qualities {
+		mapVal := "0:v"
+		if len(qualities) > 1 {
+			mapVal = fmt.Sprintf("[s%d]", i)
+		}
+		segFile := filepath.Join(hlsDir, q.Label, "seg_%04d.ts")
+		playlist := filepath.Join(hlsDir, q.Label, "index.m3u8")
+		args = append(args,
+			"-map", mapVal,
+			"-c:v", "libx264",
+			"-preset", preset,
+			"-crf", fmt.Sprintf("%d", q.CRF),
+			"-g", "48", "-sc_threshold", "0",
+			"-maxrate", q.MaxBitrate, "-bufsize", q.BufSize,
+			"-hls_time", fmt.Sprintf("%d", segSec),
+			"-hls_playlist_type", "vod",
+			"-hls_segment_filename", segFile,
+			playlist,
+		)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		os.RemoveAll(hlsDir)
+		today := time.Now().Format("2006-01-02")
+		_ = database.AppendFFmpegLog(today, name, fmt.Sprintf("--- HLS Error for %s: %s ---\n%s\n", name, time.Now(), stderr.String()))
+		return fmt.Errorf("ffmpeg HLS encode failed for %s: %w", name, err)
+	}
+
+	// Probe the source frame resolution so the master playlist carries an accurate
+	// RESOLUTION tag for the pass-through level. This lets VHS and the quality
+	// selector correctly identify and label the 4K (or other) source rendition.
+	var sourceW, sourceH int
+	if firstSnap := firstFileInConcatList(concatListPath); firstSnap != "" {
+		sourceW, sourceH = probeVideoDimensions(firstSnap)
+	}
+
+	if err := writeMasterPlaylist(hlsDir, qualities, sourceW, sourceH); err != nil {
+		return err
+	}
+	log.Printf("Generated HLS: %s", hlsDir)
+	return nil
+}
+
+// writeMasterPlaylist writes an HLS master.m3u8 referencing each quality level.
+// sourceW/sourceH are the probed pixel dimensions of the source frames; they are
+// written as the RESOLUTION tag for any pass-through (Height==0) quality level.
+// Both may be 0 if probing failed, in which case the source entry has no RESOLUTION.
+func writeMasterPlaylist(hlsDir string, qualities []HLSQuality, sourceW, sourceH int) error {
+	var sb strings.Builder
+	sb.WriteString("#EXTM3U\n#EXT-X-VERSION:3\n")
+	for _, q := range qualities {
+		var resTag string
+		switch {
+		case q.Height > 0:
+			// Downscaled variant — compute width from target height assuming 16:9.
+			w := q.Height * 16 / 9
+			resTag = fmt.Sprintf(",RESOLUTION=%dx%d", w, q.Height)
+		case sourceW > 0 && sourceH > 0:
+			// Pass-through source level — use the probed actual camera resolution.
+			resTag = fmt.Sprintf(",RESOLUTION=%dx%d", sourceW, sourceH)
+		}
+		sb.WriteString(fmt.Sprintf(
+			"#EXT-X-STREAM-INF:BANDWIDTH=%d%s,NAME=\"%s\"\n%s/index.m3u8\n",
+			q.Bandwidth, resTag, q.Label, q.Label,
+		))
+	}
+	return os.WriteFile(filepath.Join(hlsDir, "master.m3u8"), []byte(sb.String()), 0644)
+}
+
+// generateMP4 encodes a single H.264 MP4 with fast-start from the concat list.
+func generateMP4(name, concatListPath string) error {
+	dataDir := config.AppConfig.DataDir
+	outputPath := filepath.Join(dataDir, fmt.Sprintf("timelapse_%s.mp4", name))
+	tempPath := outputPath + ".tmp.mp4"
+
+	preset := settings.Get("video.encoder_preset", "fast")
+	crf := settings.GetCRFForQuality(settings.Get("video.quality", "medium"))
+	maxBitrate := settings.Get("video.max_bitrate", "2M")
+	bufSize := computeBufSize(maxBitrate)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ffmpeg",
+		"-hide_banner", "-loglevel", "error",
+		"-f", "concat", "-safe", "0", "-i", concatListPath,
+		"-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
+		"-c:v", "libx264",
+		"-preset", preset,
+		"-crf", crf,
+		"-maxrate", maxBitrate, "-bufsize", bufSize,
+		"-movflags", "+faststart",
+		"-threads", fmt.Sprintf("%d", getFFmpegThreads()),
+		"-an", "-y", tempPath,
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		os.Remove(tempPath)
+		today := time.Now().Format("2006-01-02")
+		_ = database.AppendFFmpegLog(today, name, fmt.Sprintf("--- MP4 Error for %s: %s ---\n%s\n", name, time.Now(), stderr.String()))
+		return fmt.Errorf("ffmpeg MP4 encode failed for %s: %w", name, err)
+	}
+
+	os.Remove(outputPath)
+	if err := os.Rename(tempPath, outputPath); err != nil {
+		return fmt.Errorf("failed to rename MP4 temp file: %w", err)
+	}
+	log.Printf("Generated MP4: %s", outputPath)
+	return nil
+}
