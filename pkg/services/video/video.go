@@ -1058,8 +1058,11 @@ func cleanMonthlyVideos() {
 	if keepMonths < 1 {
 		keepMonths = 1
 	}
-	oldestAllowedYear := now.Year()
-	oldestAllowedMonth := now.Month() - time.Month(keepMonths-1)
+	// Anchor on last month: monthly timelapses cover completed months, so the
+	// newest possible file is for the previous calendar month.
+	anchor := now.AddDate(0, -1, 0)
+	oldestAllowedYear := anchor.Year()
+	oldestAllowedMonth := anchor.Month() - time.Month(keepMonths-1)
 	for oldestAllowedMonth <= 0 {
 		oldestAllowedMonth += 12
 		oldestAllowedYear--
