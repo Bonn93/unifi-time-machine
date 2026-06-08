@@ -8,7 +8,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.45
 	github.com/shirou/gopsutil/v4 v4.26.4
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/crypto v0.51.0
+	golang.org/x/crypto v0.52.0
 )
 
 require (
