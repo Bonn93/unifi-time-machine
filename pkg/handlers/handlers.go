@@ -432,11 +432,8 @@ func HandleShareLink(c *gin.Context) {
 		return
 	}
 
-	absFilePath, err := filepath.Abs(filepath.Join(config.AppConfig.DataDir, filepath.Base(filePath)))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve file path"})
-		return
-	}
+	relPath := strings.TrimPrefix(filepath.FromSlash(filePath), "/data/")
+	absFilePath := filepath.Clean(filepath.Join(config.AppConfig.DataDir, relPath))
 	if !strings.HasPrefix(absFilePath, config.AppConfig.DataDir) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
@@ -454,7 +451,7 @@ func HandleShareLink(c *gin.Context) {
 		return
 	}
 
-	shareLink := fmt.Sprintf("%s/public/%s", c.Request.Host, token)
+	shareLink := fmt.Sprintf("%s/public/%s/%s", c.Request.Host, token, filepath.Base(absFilePath))
 	response := gin.H{"shareLink": shareLink}
 	if expiry > 0 {
 		response["expiresAt"] = util.FormatDateTime(time.Now().Add(expiry))
@@ -478,17 +475,77 @@ func HandlePublicLink(c *gin.Context) {
 		return
 	}
 
-	absFilePath, err := filepath.Abs(filepath.Join(config.AppConfig.DataDir, filepath.Base(filePath)))
-	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to resolve file path")
-		return
-	}
+	relPath := strings.TrimPrefix(filepath.FromSlash(filePath), "/data/")
+	absFilePath := filepath.Clean(filepath.Join(config.AppConfig.DataDir, relPath))
 	if !strings.HasPrefix(absFilePath, config.AppConfig.DataDir) {
 		c.String(http.StatusForbidden, "Access denied")
 		return
 	}
 
 	c.File(absFilePath)
+}
+
+// HandlePublicSubpath serves a file from a share token's base path.
+// For HLS tokens (stored path ends in .m3u8) it allows any .m3u8 or .ts file
+// within the same stream directory. For single-file tokens it only serves the
+// exact stored filename.
+func HandlePublicSubpath(c *gin.Context) {
+	token := c.Param("token")
+	// Gin's *filepath param always includes a leading "/"; strip it.
+	requestedFile := strings.TrimPrefix(filepath.FromSlash(c.Param("filepath")), string(filepath.Separator))
+
+	storedPath, err := database.GetSharedFilePath(token)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Error retrieving file path")
+		return
+	}
+	if storedPath == "" {
+		c.String(http.StatusNotFound, "Link not found or expired")
+		return
+	}
+
+	relStored := strings.TrimPrefix(filepath.FromSlash(storedPath), "/data/")
+	absStored := filepath.Clean(filepath.Join(config.AppConfig.DataDir, relStored))
+	if !strings.HasPrefix(absStored, config.AppConfig.DataDir) {
+		c.String(http.StatusForbidden, "Access denied")
+		return
+	}
+
+	var absTarget string
+	if strings.HasSuffix(strings.ToLower(absStored), ".m3u8") {
+		// HLS token: allow .m3u8 and .ts files within the stream directory only.
+		hlsDir := filepath.Dir(absStored)
+		if requestedFile == "" {
+			absTarget = absStored
+		} else {
+			absTarget = filepath.Clean(filepath.Join(hlsDir, requestedFile))
+			if !strings.HasPrefix(absTarget, hlsDir+string(filepath.Separator)) {
+				c.String(http.StatusForbidden, "Access denied")
+				return
+			}
+		}
+		ext := strings.ToLower(filepath.Ext(absTarget))
+		if ext != ".m3u8" && ext != ".ts" {
+			c.String(http.StatusForbidden, "Access denied")
+			return
+		}
+		if ext == ".m3u8" {
+			c.Header("Content-Type", "application/x-mpegURL")
+			c.Header("Cache-Control", "public, max-age=3600")
+		} else {
+			c.Header("Content-Type", "video/MP2T")
+			c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		}
+	} else {
+		// Single-file token: only serve the exact stored filename.
+		if requestedFile != filepath.Base(absStored) {
+			c.String(http.StatusForbidden, "Access denied")
+			return
+		}
+		absTarget = absStored
+	}
+
+	c.File(absTarget)
 }
 
 // knownSettingKeys lists all keys that HandleSaveSettings will accept.

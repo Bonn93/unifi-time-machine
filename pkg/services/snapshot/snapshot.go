@@ -13,44 +13,110 @@ import (
 	"strings"
 	"time"
 
-	"time-machine/pkg/util"
 	"time-machine/pkg/config"
 	"time-machine/pkg/services/settings"
+	"time-machine/pkg/util"
 )
 
-var useHighQuality bool
+// hqCapable is the camera's auto-detected HQ snapshot capability, set at startup.
+// It is only written once during InitSnapshotSettings and is safe to read concurrently.
+var hqCapable bool
 
-// InitSnapshotSettings checks camera capabilities and configuration to decide whether to use high-quality snapshots.
+// InitSnapshotSettings probes camera capabilities and seeds the initial HQ snapshot mode.
+// The effective mode is re-evaluated dynamically at each snapshot, so admin changes to
+// snapshot.hq_params take effect on the next capture without a restart.
 func InitSnapshotSettings() {
-	log.Println("Initializing snapshot settings...")
+	hqSetting := strings.ToLower(settings.Get("snapshot.hq_params", "auto"))
 
+	log.Println("╔══ Snapshot Quality Configuration ════════════════════════")
+	log.Printf("║  snapshot.hq_params (HQSNAP): %q", hqSetting)
+
+	switch hqSetting {
+	case "true":
+		hqCapable = true
+		log.Println("║  Mode: FORCED ON — high-quality snapshots enabled regardless of camera capability")
+	case "false":
+		hqCapable = false
+		log.Println("║  Mode: FORCED OFF — standard quality snapshots (HQSNAP=false)")
+	default: // "auto" or unrecognised
+		log.Println("║  Mode: AUTO — probing camera for HQ snapshot support...")
+		detectAndPersistHQCapability()
+	}
+
+	log.Printf("║  Effective snapshot quality: %s", GetEffectiveSnapshotQuality())
+	log.Println("╚══════════════════════════════════════════════════════════")
+}
+
+// detectAndPersistHQCapability queries the camera API for supportFullHdSnapshot and
+// stores the result in the settings DB so future startups have a fallback value.
+func detectAndPersistHQCapability() {
+	status := GetCameraStatus()
+
+	if errMsg, ok := status["error"]; ok {
+		// Fall back to the last-known persisted value so a brief offline camera
+		// doesn't permanently disable HQ on the next restart.
+		storedCapable := strings.ToLower(settings.Get("camera.hq_capable", "false"))
+		hqCapable = storedCapable == "true"
+		log.Printf("║  WARNING: Camera probe failed (%v)", errMsg)
+		log.Printf("║           Using last-known stored capability: hq_capable=%v", hqCapable)
+		return
+	}
+
+	flags, ok := status["featureFlags"].(map[string]interface{})
+	if !ok {
+		log.Println("║  WARNING: featureFlags missing from camera API response — defaulting to standard quality")
+		hqCapable = false
+	} else if supported, ok := flags["supportFullHdSnapshot"].(bool); ok {
+		hqCapable = supported
+		if supported {
+			log.Println("║  Camera: supportFullHdSnapshot = true  — HQ snapshots AVAILABLE for this model")
+		} else {
+			log.Println("║  Camera: supportFullHdSnapshot = false — HQ snapshots NOT supported by this model")
+		}
+	} else {
+		log.Println("║  WARNING: supportFullHdSnapshot flag absent in featureFlags — defaulting to standard quality")
+		hqCapable = false
+	}
+
+	// Persist detected value as a fallback for future startups when the camera may be offline.
+	if err := settings.Set("camera.hq_capable", strconv.FormatBool(hqCapable)); err != nil {
+		log.Printf("║  WARNING: could not persist camera.hq_capable to DB: %v", err)
+	}
+}
+
+// isHighQualityEnabled returns whether the next snapshot should use the HQ endpoint.
+// It reads snapshot.hq_params from the DB on every call so admin changes are hot-reloadable
+// without a service restart.
+func isHighQualityEnabled() bool {
 	switch strings.ToLower(settings.Get("snapshot.hq_params", "auto")) {
 	case "true":
-		useHighQuality = true
-		log.Println("High Quality Snapshots enabled by environment override (HQSNAP=true).")
+		return true
 	case "false":
-		useHighQuality = false
-		log.Println("High Quality Snapshots disabled by environment override (HQSNAP=false).")
-	default: // "auto" or empty
-		log.Println("HQSNAP is set to 'auto' or unset. Checking camera capabilities...")
-		cameraStatus := GetCameraStatus()
-		if err, ok := cameraStatus["error"]; ok {
-			log.Printf("Cannot determine camera capabilities, API error: %v", err)
-			useHighQuality = false
-		} else if featureFlags, ok := cameraStatus["featureFlags"].(map[string]interface{}); ok {
-			if supported, ok := featureFlags["supportFullHdSnapshot"].(bool); ok {
-				useHighQuality = supported
-				log.Printf("Camera capability 'supportFullHdSnapshot' is %v.", supported)
-			} else {
-				log.Println("Could not find 'supportFullHdSnapshot' boolean in featureFlags. Defaulting to standard quality.")
-				useHighQuality = false
-			}
-		} else {
-			log.Println("Could not determine 'featureFlags' from camera status. Defaulting to standard quality.")
-			useHighQuality = false
-		}
+		return false
+	default: // "auto"
+		return hqCapable
 	}
-	log.Printf("High Quality Snapshots enabled: %v", useHighQuality)
+}
+
+// GetHQCapable returns the auto-detected camera HQ capability (set at startup).
+func GetHQCapable() bool {
+	return hqCapable
+}
+
+// GetEffectiveSnapshotQuality returns a human-readable description of the snapshot
+// quality that will be used for the next capture, including how the mode was selected.
+func GetEffectiveSnapshotQuality() string {
+	switch strings.ToLower(settings.Get("snapshot.hq_params", "auto")) {
+	case "true":
+		return "High Quality (forced on)"
+	case "false":
+		return "Standard (forced off)"
+	default: // "auto"
+		if hqCapable {
+			return "High Quality (auto-detected)"
+		}
+		return "Standard (auto-detected)"
+	}
 }
 
 // --- CORE LOGIC (Scheduler and API calls) ---
@@ -69,7 +135,7 @@ func TakeSnapshot() {
 	}
 
 	apiURL := fmt.Sprintf("%s/proxy/protect/integration/v1/cameras/%s/snapshot", config.AppConfig.UFPHost, config.AppConfig.TargetCameraID)
-	if useHighQuality {
+	if isHighQualityEnabled() {
 		apiURL += "?highQuality=true"
 	}
 
@@ -226,12 +292,17 @@ var GetFormattedCameraStatus = func() map[string]string {
 		name = nameStr
 	}
 
+	hqEnabled := isHighQualityEnabled()
 	return map[string]string{
-		"Name":      name,
-		"Model":     model,
-		"Status":    status,
-		"UpSince":   uptimeStr,
-		"Connected": strconv.FormatBool(status == "CONNECTED"),
+		"Name":            name,
+		"Model":           model,
+		"Status":          status,
+		"UpSince":         uptimeStr,
+		"Connected":       strconv.FormatBool(status == "CONNECTED"),
+		"HQCapable":       strconv.FormatBool(hqCapable),
+		"HQSetting":       strings.ToLower(settings.Get("snapshot.hq_params", "auto")),
+		"HQEnabled":       strconv.FormatBool(hqEnabled),
+		"SnapshotQuality": GetEffectiveSnapshotQuality(),
 	}
 }
 
