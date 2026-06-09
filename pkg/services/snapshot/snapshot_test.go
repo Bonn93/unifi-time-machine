@@ -58,20 +58,25 @@ func TestInitSnapshotSettings(t *testing.T) {
 	config.AppConfig.UFPAPIKey = "test-key"
 	config.AppConfig.TargetCameraID = "test-cam"
 
-	// Test "auto" — mock server returns supportFullHdSnapshot=true
+	// "auto" — mock server returns supportFullHdSnapshot=true, so HQ should be detected
 	settings.Set("snapshot.hq_params", "auto")
 	InitSnapshotSettings()
-	assert.True(t, useHighQuality)
+	assert.True(t, GetHQCapable(), "auto mode should detect HQ capability from mock camera")
+	assert.True(t, isHighQualityEnabled())
 
-	// Test "true"
+	// Persist check: camera.hq_capable should be stored in the DB
+	stored := settings.Get("camera.hq_capable", "")
+	assert.Equal(t, "true", stored, "detected HQ capability should be persisted in DB")
+
+	// "true" — forced on regardless of camera
 	settings.Set("snapshot.hq_params", "true")
 	InitSnapshotSettings()
-	assert.True(t, useHighQuality)
+	assert.True(t, isHighQualityEnabled())
 
-	// Test "false"
+	// "false" — forced off regardless of camera
 	settings.Set("snapshot.hq_params", "false")
 	InitSnapshotSettings()
-	assert.False(t, useHighQuality)
+	assert.False(t, isHighQualityEnabled())
 }
 
 func TestTakeSnapshot(t *testing.T) {
@@ -88,7 +93,9 @@ func TestTakeSnapshot(t *testing.T) {
 	config.AppConfig.UFPAPIKey = "test-key"
 	config.AppConfig.TargetCameraID = "test-cam"
 
-	useHighQuality = true
+	// Force HQ on so the snapshot URL uses ?highQuality=true
+	settings.Set("snapshot.hq_params", "true")
+	hqCapable = true
 	TakeSnapshot()
 
 	now := time.Now()
@@ -120,10 +127,15 @@ func TestGetCameraStatus(t *testing.T) {
 func TestGetFormattedCameraStatus(t *testing.T) {
 	setupMockServer()
 	defer teardownMockServer()
+	setupTestDB(t)
 
 	config.AppConfig.UFPHost = mockServer.URL
 	config.AppConfig.UFPAPIKey = "test-key"
 	config.AppConfig.TargetCameraID = "test-cam"
+
+	// Seed HQ setting and simulate an HQ-capable camera detected at startup
+	settings.Set("snapshot.hq_params", "auto")
+	hqCapable = true
 
 	formattedStatus := GetFormattedCameraStatus()
 	assert.NotNil(t, formattedStatus)
@@ -131,4 +143,72 @@ func TestGetFormattedCameraStatus(t *testing.T) {
 	assert.Equal(t, "Test Camera", formattedStatus["Name"])
 	assert.Equal(t, "G5 Dome", formattedStatus["Model"])
 	assert.Equal(t, "true", formattedStatus["Connected"])
+
+	// HQ fields
+	assert.Equal(t, "true", formattedStatus["HQCapable"])
+	assert.Equal(t, "true", formattedStatus["HQEnabled"])
+	assert.Equal(t, "auto", formattedStatus["HQSetting"])
+	assert.Contains(t, formattedStatus["SnapshotQuality"], "High Quality")
+}
+
+func TestIsHighQualityEnabled(t *testing.T) {
+	setupTestDB(t)
+
+	hqCapable = true
+
+	settings.Set("snapshot.hq_params", "true")
+	assert.True(t, isHighQualityEnabled(), "forced true should enable HQ")
+
+	settings.Set("snapshot.hq_params", "false")
+	assert.False(t, isHighQualityEnabled(), "forced false should disable HQ")
+
+	settings.Set("snapshot.hq_params", "auto")
+	assert.True(t, isHighQualityEnabled(), "auto with hqCapable=true should enable HQ")
+
+	hqCapable = false
+	assert.False(t, isHighQualityEnabled(), "auto with hqCapable=false should disable HQ")
+}
+
+func TestGetEffectiveSnapshotQuality(t *testing.T) {
+	setupTestDB(t)
+
+	hqCapable = true
+
+	settings.Set("snapshot.hq_params", "true")
+	q := GetEffectiveSnapshotQuality()
+	assert.Contains(t, q, "High Quality")
+	assert.Contains(t, q, "forced")
+
+	settings.Set("snapshot.hq_params", "false")
+	q = GetEffectiveSnapshotQuality()
+	assert.Contains(t, q, "Standard")
+	assert.Contains(t, q, "forced")
+
+	settings.Set("snapshot.hq_params", "auto")
+	q = GetEffectiveSnapshotQuality()
+	assert.Contains(t, q, "High Quality")
+	assert.Contains(t, q, "auto")
+
+	hqCapable = false
+	q = GetEffectiveSnapshotQuality()
+	assert.Contains(t, q, "Standard")
+	assert.Contains(t, q, "auto")
+}
+
+func TestDetectAndPersistHQCapability_FallbackOnError(t *testing.T) {
+	setupTestDB(t)
+
+	// Pre-seed a stored capability value
+	settings.Set("camera.hq_capable", "true")
+
+	// Point to an unreachable host to force an error
+	config.AppConfig.UFPHost = "http://127.0.0.1:1"
+	config.AppConfig.UFPAPIKey = "test-key"
+	config.AppConfig.TargetCameraID = "test-cam"
+
+	hqCapable = false // reset
+	detectAndPersistHQCapability()
+
+	// Should fall back to the stored value
+	assert.True(t, hqCapable, "should use last-known stored value when camera probe fails")
 }

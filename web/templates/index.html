@@ -77,11 +77,25 @@
                     <div class="card-body">
                         <p><strong>Name:</strong> {{.CameraStatus.Name}}</p>
                         <p><strong>Model:</strong> {{.CameraStatus.Model}}</p>
-                        <p><strong>Status:</strong> 
+                        <p><strong>Status:</strong>
                             {{if eq .CameraStatus.Connected "true"}}
                                 <span class="badge status-badge-ok">{{.CameraStatus.Status}}</span>
                             {{else}}
                                 <span class="badge status-error">{{.CameraStatus.Status}}</span>
+                            {{end}}
+                        </p>
+                        <p><strong>HQ Capable:</strong>
+                            {{if eq .CameraStatus.HQCapable "true"}}
+                                <span class="badge status-badge-ok">Yes</span>
+                            {{else}}
+                                <span class="badge bg-secondary">No</span>
+                            {{end}}
+                        </p>
+                        <p><strong>Snapshot Quality:</strong>
+                            {{if eq .CameraStatus.HQEnabled "true"}}
+                                <span class="badge status-badge-ok">{{.CameraStatus.SnapshotQuality}}</span>
+                            {{else}}
+                                <span class="badge bg-secondary">{{.CameraStatus.SnapshotQuality}}</span>
                             {{end}}
                         </p>
                     </div>

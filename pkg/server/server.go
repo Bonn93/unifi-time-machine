@@ -32,6 +32,7 @@ func SetupRouter() *gin.Engine {
 	r.POST("/api/login", auth.LoginHandler)
 	r.GET("/unauthorized", handlers.HandleUnauthorized)
 	r.GET("/public/:token", handlers.HandlePublicLink)
+	r.GET("/public/:token/*filepath", handlers.HandlePublicSubpath)
 
 	// Static files for CSS and JS
 	r.Static("/static", "./web/static")

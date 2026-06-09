@@ -368,7 +368,7 @@ func TestHandleShareLink(t *testing.T) {
 		HandleShareLink(c)
 	})
 
-	// Test successful creation
+	// Test successful creation — URL must include the filename
 	form := "filePath=/data/test.mp4"
 	req, _ := http.NewRequest("POST", "/share", strings.NewReader(form))
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
@@ -378,10 +378,21 @@ func TestHandleShareLink(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "shareLink")
 	assert.Contains(t, w.Body.String(), "expiresAt")
+	assert.Contains(t, w.Body.String(), "test.mp4")
+
+	// HLS path: URL must end with master.m3u8
+	form = "filePath=/data/hls/timelapse_daily/master.m3u8"
+	req, _ = http.NewRequest("POST", "/share", strings.NewReader(form))
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "master.m3u8")
 
 	// Test unlimited expiry
 	settings.Set("share.link_expiry_hours", "0")
 	settings.Invalidate()
+	form = "filePath=/data/test.mp4"
 	req, _ = http.NewRequest("POST", "/share", strings.NewReader(form))
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
@@ -407,7 +418,7 @@ func TestHandlePublicLink(t *testing.T) {
 	dummyFilePath := filepath.Join(config.AppConfig.DataDir, "test.mp4")
 	os.WriteFile(dummyFilePath, []byte("dummy content"), 0644)
 
-	// Create a share link
+	// Create a share link (backward-compat: stored path without /data/ prefix)
 	token, err := database.CreateShareLink("test.mp4", time.Hour)
 	assert.NoError(t, err)
 
@@ -424,6 +435,107 @@ func TestHandlePublicLink(t *testing.T) {
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func setupPublicSubpathRouter(t *testing.T) *gin.Engine {
+	t.Helper()
+	r := setupTestApp(t)
+	r.GET("/public/:token", HandlePublicLink)
+	r.GET("/public/:token/*filepath", HandlePublicSubpath)
+	return r
+}
+
+func TestHandlePublicSubpath_MP4(t *testing.T) {
+	r := setupPublicSubpathRouter(t)
+
+	os.WriteFile(filepath.Join(config.AppConfig.DataDir, "timelapse_daily.mp4"), []byte("mp4 content"), 0644)
+	token, _ := database.CreateShareLink("/data/timelapse_daily.mp4", time.Hour)
+
+	// Correct filename → 200
+	req, _ := http.NewRequest("GET", "/public/"+token+"/timelapse_daily.mp4", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "mp4 content", w.Body.String())
+
+	// Wrong filename → 403
+	req, _ = http.NewRequest("GET", "/public/"+token+"/other.mp4", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestHandlePublicSubpath_HLS(t *testing.T) {
+	r := setupPublicSubpathRouter(t)
+
+	// Create the HLS directory with a manifest and a segment
+	hlsDir := filepath.Join(config.AppConfig.DataDir, "hls", "timelapse_daily")
+	os.MkdirAll(hlsDir, 0755)
+	os.WriteFile(filepath.Join(hlsDir, "master.m3u8"), []byte("#EXTM3U"), 0644)
+	os.WriteFile(filepath.Join(hlsDir, "segment_0.ts"), []byte("ts data"), 0644)
+
+	token, _ := database.CreateShareLink("/data/hls/timelapse_daily/master.m3u8", time.Hour)
+
+	// Manifest → 200 with correct Content-Type
+	req, _ := http.NewRequest("GET", "/public/"+token+"/master.m3u8", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Header().Get("Content-Type"), "mpegURL")
+	assert.Equal(t, "#EXTM3U", w.Body.String())
+
+	// Segment → 200 with correct Content-Type
+	req, _ = http.NewRequest("GET", "/public/"+token+"/segment_0.ts", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Header().Get("Content-Type"), "MP2T")
+	assert.Equal(t, "ts data", w.Body.String())
+
+	// Non-HLS extension → 403
+	req, _ = http.NewRequest("GET", "/public/"+token+"/secret.txt", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestHandlePublicSubpath_PathTraversal(t *testing.T) {
+	r := setupPublicSubpathRouter(t)
+
+	hlsDir := filepath.Join(config.AppConfig.DataDir, "hls", "timelapse_daily")
+	os.MkdirAll(hlsDir, 0755)
+	os.WriteFile(filepath.Join(hlsDir, "master.m3u8"), []byte("#EXTM3U"), 0644)
+
+	// Write a file one level up from hlsDir that should never be served
+	os.WriteFile(filepath.Join(config.AppConfig.DataDir, "hls", "secret.ts"), []byte("secret"), 0644)
+
+	token, _ := database.CreateShareLink("/data/hls/timelapse_daily/master.m3u8", time.Hour)
+
+	req, _ := http.NewRequest("GET", "/public/"+token+"/../secret.ts", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestHandlePublicSubpath_ExpiredToken(t *testing.T) {
+	r := setupPublicSubpathRouter(t)
+
+	// Token expired 1 second ago
+	token, _ := database.CreateShareLink("/data/timelapse_daily.mp4", -time.Second)
+
+	req, _ := http.NewRequest("GET", "/public/"+token+"/timelapse_daily.mp4", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestHandlePublicSubpath_InvalidToken(t *testing.T) {
+	r := setupPublicSubpathRouter(t)
+
+	req, _ := http.NewRequest("GET", "/public/doesnotexist/file.mp4", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 

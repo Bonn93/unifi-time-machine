@@ -31,7 +31,7 @@ func getLoadingData() gin.H {
 		"last_processed_image": "Loading...",
 		"available_dates":      []map[string]string{},
 		"system_info":          stats.GetSystemInfo(), // This is fast and has its own "Loading..." state
-		"camera_status":        gin.H{"Name": "Loading...", "Model": "Loading...", "Status": "Loading...", "Connected": "false"},
+		"camera_status":        gin.H{"Name": "Loading...", "Model": "Loading...", "Status": "Loading...", "Connected": "false", "HQCapable": "false", "HQEnabled": "false", "HQSetting": "auto", "SnapshotQuality": "Loading..."},
 		"daily_gallery":        []map[string]string{},
 		"is_loading":           true, // Flag for the frontend to know the data is temporary
 	}

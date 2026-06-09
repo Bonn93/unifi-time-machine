@@ -265,6 +265,49 @@
 
                     </div>
 
+                    <!-- ── Snapshot Quality ───────────────────────────── -->
+                    <p class="settings-section-label mt-4"><i class="fas fa-camera me-1"></i> Snapshot Quality (HQSNAP)</p>
+                    <div class="row g-3">
+
+                        <div class="col-md-6">
+                            <label class="form-label">High-Quality Snapshot Mode</label>
+                            <select class="form-control" name="snapshot.hq_params">
+                                <option value="auto" {{ if eq (index .Settings "snapshot.hq_params") "auto" }}selected{{ end }}>Auto (detect from camera capabilities)</option>
+                                <option value="true" {{ if eq (index .Settings "snapshot.hq_params") "true" }}selected{{ end }}>Always High Quality (force on)</option>
+                                <option value="false" {{ if eq (index .Settings "snapshot.hq_params") "false" }}selected{{ end }}>Always Standard (force off)</option>
+                            </select>
+                            <div class="form-text text-secondary">
+                                Controls whether snapshots are captured at the camera's native full resolution (<strong>High Quality</strong>) or the default resolution.
+                                <strong>Auto</strong> queries the camera's <code>supportFullHdSnapshot</code> flag at startup and enables HQ automatically if the camera supports it.
+                                <strong>Force On / Force Off</strong> overrides the camera capability check entirely.
+                                <br>
+                                <span class="text-warning"><i class="fas fa-circle-info me-1"></i>
+                                Changes to <strong>Auto → Force On/Off</strong> take effect on the next snapshot capture — <strong>no restart needed</strong>.
+                                Switching back to <strong>Auto</strong> uses the capability detected at the last startup; a restart re-probes the camera.
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Camera HQ Capability (detected at startup)</label>
+                            <div class="form-control" style="background:#2a2a2a; cursor:default;">
+                                {{ $cap := index .Settings "camera.hq_capable" }}
+                                {{ if eq $cap "true" }}
+                                    <i class="fas fa-circle-check text-success me-1"></i> Camera supports full-HD snapshots (<code>supportFullHdSnapshot = true</code>)
+                                {{ else if eq $cap "false" }}
+                                    <i class="fas fa-circle-xmark text-danger me-1"></i> Camera does <strong>not</strong> support full-HD snapshots
+                                {{ else }}
+                                    <i class="fas fa-circle-question text-secondary me-1"></i> Not yet detected — auto-detected on next startup or when <strong>Auto</strong> mode is active
+                                {{ end }}
+                            </div>
+                            <div class="form-text text-secondary">
+                                This read-only field shows what the camera reported for <code>featureFlags.supportFullHdSnapshot</code> when the service last started.
+                                It is updated automatically at startup and persisted in the database as a fallback if the camera is temporarily unreachable.
+                            </div>
+                        </div>
+
+                    </div>
+
                     <!-- ── HLS Settings (shown only when HLS selected) ── -->
                     <div id="hlsFields">
                         <p class="settings-section-label mt-4"><i class="fas fa-list me-1"></i> HLS Adaptive Streaming</p>
