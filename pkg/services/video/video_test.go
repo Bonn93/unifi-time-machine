@@ -1,6 +1,7 @@
 package video
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +19,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// validSnapshotData returns a byte slice large enough to pass the minValidSnapshotBytes guard.
+func validSnapshotData() []byte {
+	return bytes.Repeat([]byte("J"), int(minValidSnapshotBytes)+100)
+}
+
 func setupTest(t *testing.T) (string, func()) {
 	tempDir, err := os.MkdirTemp("", "video-test")
 	assert.NoError(t, err)
@@ -31,13 +37,13 @@ func setupTest(t *testing.T) (string, func()) {
 	settings.Set("video.daylight_end_hour", "24")
 	settings.Invalidate()
 
-	// Create some dummy snapshot files
+	// Create snapshot files large enough to pass minValidSnapshotBytes
 	for i := 0; i < 5; i++ {
 		now := time.Now().Add(-time.Duration(i) * time.Hour)
 		snapshotDir := filepath.Join(config.AppConfig.SnapshotsDir, now.Format("2006-01"), now.Format("02"), now.Format("15"))
 		os.MkdirAll(snapshotDir, 0755)
 		dummyFile := filepath.Join(snapshotDir, now.Format("2006-01-02-15-04-05")+".jpg")
-		os.WriteFile(dummyFile, []byte("dummy"), 0644)
+		os.WriteFile(dummyFile, validSnapshotData(), 0644)
 	}
 
 	return tempDir, func() {
@@ -76,13 +82,14 @@ func TestFilterSnapshots(t *testing.T) {
 	testTime := time.Date(2025, 12, 22, 12, 0, 0, 0, time.UTC)
 
 	// Create hourly snapshots for Dec 21, 22, 23
+	data := validSnapshotData()
 	for dayOffset := -1; dayOffset <= 1; dayOffset++ {
 		currentDay := testTime.AddDate(0, 0, dayOffset)
 		for hour := 0; hour < 24; hour++ {
 			tm := time.Date(currentDay.Year(), currentDay.Month(), currentDay.Day(), hour, 0, 0, 0, time.UTC)
 			snapshotDir := filepath.Join(config.AppConfig.SnapshotsDir, tm.Format("2006-01"), tm.Format("02"), tm.Format("15"))
 			os.MkdirAll(snapshotDir, 0755)
-			os.WriteFile(filepath.Join(snapshotDir, tm.Format("2006-01-02-15-04-05")+".jpg"), []byte("dummy"), 0644)
+			os.WriteFile(filepath.Join(snapshotDir, tm.Format("2006-01-02-15-04-05")+".jpg"), data, 0644)
 		}
 	}
 
@@ -119,45 +126,51 @@ func TestCleanupSnapshots(t *testing.T) {
 	settings.Set("snapshot.retention_days", "10")
 	settings.Invalidate()
 
-	// Create an old file that should be deleted
+	// Old file (past retention) should be deleted.
 	oldTime := time.Now().Add(-11 * 24 * time.Hour)
 	oldDir := filepath.Join(config.AppConfig.SnapshotsDir, oldTime.Format("2006-01"), oldTime.Format("02"), oldTime.Format("15"))
 	os.MkdirAll(oldDir, 0755)
 	oldFile := filepath.Join(oldDir, oldTime.Format("2006-01-02-15-04-05")+".jpg")
-	os.WriteFile(oldFile, []byte("old"), 0644)
+	os.WriteFile(oldFile, validSnapshotData(), 0644)
 
-	// Create a newer file that should be kept
+	// New, valid-sized file should be kept.
 	newTime := time.Now().Add(-5 * 24 * time.Hour)
 	newDir := filepath.Join(config.AppConfig.SnapshotsDir, newTime.Format("2006-01"), newTime.Format("02"), newTime.Format("15"))
 	os.MkdirAll(newDir, 0755)
 	newFile := filepath.Join(newDir, newTime.Format("2006-01-02-15-04-05")+".jpg")
-	os.WriteFile(newFile, []byte("new"), 0644)
+	os.WriteFile(newFile, validSnapshotData(), 0644)
 
-	// Create a malformed file that should be skipped and kept
+	// Malformed filename cannot be parsed — skipped (kept).
 	malformedFile := filepath.Join(config.AppConfig.SnapshotsDir, "malformed-file.jpg")
-	os.WriteFile(malformedFile, []byte("malformed"), 0644)
+	os.WriteFile(malformedFile, validSnapshotData(), 0644)
 
-	// Create a zero-byte file that should be deleted
+	// Zero-byte file should be deleted regardless of age.
 	zeroByteFile := filepath.Join(config.AppConfig.SnapshotsDir, "zero-byte.jpg")
 	os.WriteFile(zeroByteFile, []byte{}, 0644)
 
+	// Below-minimum-size file should also be deleted regardless of age.
+	tinyDir := filepath.Join(config.AppConfig.SnapshotsDir, newTime.Format("2006-01"), newTime.Format("02"), newTime.Format("15"))
+	os.MkdirAll(tinyDir, 0755)
+	tinyTime := newTime.Add(time.Minute)
+	tinyFile := filepath.Join(tinyDir, tinyTime.Format("2006-01-02-15-04-05")+".jpg")
+	os.WriteFile(tinyFile, bytes.Repeat([]byte("x"), int(minValidSnapshotBytes)-1), 0644)
+
 	CleanupSnapshots()
 
-	// Assert old file is deleted
 	_, err := os.Stat(oldFile)
-	assert.True(t, os.IsNotExist(err), "Old snapshot file should be deleted")
+	assert.True(t, os.IsNotExist(err), "old snapshot file should be deleted")
 
-	// Assert new file still exists
 	_, err = os.Stat(newFile)
-	assert.False(t, os.IsNotExist(err), "New snapshot file should not be deleted")
+	assert.False(t, os.IsNotExist(err), "new valid snapshot file should not be deleted")
 
-	// Assert malformed file still exists
 	_, err = os.Stat(malformedFile)
-	assert.False(t, os.IsNotExist(err), "Malformed snapshot file should not be deleted")
+	assert.False(t, os.IsNotExist(err), "malformed-name file should not be deleted (unparseable)")
 
-	// Assert zero-byte file is deleted
 	_, err = os.Stat(zeroByteFile)
-	assert.True(t, os.IsNotExist(err), "Zero-byte snapshot file should be deleted")
+	assert.True(t, os.IsNotExist(err), "zero-byte snapshot file should be deleted")
+
+	_, err = os.Stat(tinyFile)
+	assert.True(t, os.IsNotExist(err), "below-minimum-size snapshot file should be deleted")
 }
 
 func TestCreateVideoSegment_ErrorHandling(t *testing.T) {
@@ -176,51 +189,33 @@ func TestCreateVideoSegment_ErrorHandling(t *testing.T) {
 		err = createVideoSegment(zeroByteFile, segmentPath)
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid snapshot file (not found or zero size)")
+		assert.Contains(t, err.Error(), "below minimum size")
 	})
 
-	t.Run("FFmpeg timeout", func(t *testing.T) {
-		// This test is a bit tricky. We can't easily make ffmpeg hang,
-		// but we can simulate the context timeout by using a very short timeout.
-		// The principle is the same: the context should cancel the command.
+	t.Run("Below-minimum-size file", func(t *testing.T) {
+		tinyFile := filepath.Join(tempDir, "tiny_snapshot.jpg")
+		err := os.WriteFile(tinyFile, bytes.Repeat([]byte("x"), int(minValidSnapshotBytes)-1), 0644)
+		assert.NoError(t, err)
 
-		// Let's create a dummy ffmpeg command that sleeps for a while
-		originalCreateVideoSegment := createVideoSegment
-		defer func() { createVideoSegment = originalCreateVideoSegment }()
+		segmentPath := filepath.Join(tempDir, "tiny_segment.webm")
+		err = createVideoSegment(tinyFile, segmentPath)
 
-		// The test relies on a fake `ffmpeg` that is a shell script sleeping.
-		// This is complex to set up in Go's test environment without external scripts.
-		// An alternative is to trust the `context.WithTimeout` functionality
-		// and that it's being used correctly, which our code change shows it is.
-		// A simpler test is to check if the error contains "context deadline exceeded".
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "below minimum size")
+	})
 
-		// For this test, we can't guarantee a specific ffmpeg command will hang.
-		// Instead, we will assume that if we provide a non-existent file, ffmpeg will error out,
-		// but the test is for the timeout.
-		// A better approach would be to mock exec.Command, but that's a larger refactor.
-
-		// Let's stick to a conceptual test: ensure the error for a failing command is correct.
-		// A true timeout test is more of an integration test.
-		snapshotFile := filepath.Join(tempDir, "good_snapshot.jpg")
-		os.WriteFile(snapshotFile, []byte("dummy-data-so-its-not-zero"), 0644)
-
-		segmentPath := filepath.Join(tempDir, "timeout_segment.webm")
-
-		// Let's assume for this test we can replace the ffmpeg command.
-		// Since we can't do that easily, we'll test the principle.
-		// The error from a timeout is `context deadline exceeded`.
-
-		// Let's check our logging part of the fix.
-		// If ffmpeg fails, we should get a descriptive log.
+	t.Run("FFmpeg rejects non-JPEG content above size threshold", func(t *testing.T) {
+		// Write enough bytes to pass the size guard but with non-JPEG content.
+		// This exercises the FFmpeg error path after the size check passes.
 		badSnapshot := filepath.Join(tempDir, "bad_snapshot.jpg")
-		// Writing non-jpeg data to cause an error
-		os.WriteFile(badSnapshot, []byte("this is not a jpeg"), 0644)
+		os.WriteFile(badSnapshot, bytes.Repeat([]byte("this is not a jpeg "), int(minValidSnapshotBytes)/19+1), 0644)
 
+		segmentPath := filepath.Join(tempDir, "bad_segment.webm")
 		err := createVideoSegment(badSnapshot, segmentPath)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "ffmpeg (create segment) execution failed")
 
-		// Check that the error was written to the DB log
+		// Confirm the error was written to the DB log.
 		today := time.Now().Format("2006-01-02")
 		logContent, readErr := database.GetFFmpegLogContent(today)
 		assert.NoError(t, readErr)
@@ -496,12 +491,13 @@ func TestCalendarWeekMonday(t *testing.T) {
 func setupGalleryFiles(t *testing.T, galleryDir string, start time.Time, days int) {
 	t.Helper()
 	os.MkdirAll(galleryDir, 0755)
+	data := validSnapshotData()
 	for d := 0; d < days; d++ {
 		day := start.AddDate(0, 0, d)
 		for hour := 0; hour < 24; hour++ {
 			tm := time.Date(day.Year(), day.Month(), day.Day(), hour, 0, 0, 0, time.UTC)
 			name := tm.Format("2006-01-02-15") + ".jpg"
-			os.WriteFile(filepath.Join(galleryDir, name), []byte("g"), 0644)
+			os.WriteFile(filepath.Join(galleryDir, name), data, 0644)
 		}
 	}
 }
@@ -766,4 +762,98 @@ func TestCleanOldVideos_Yearly(t *testing.T) {
 	assert.Len(t, remaining, 2, "should keep only 2 yearly timelapses (current + previous)")
 	assert.Contains(t, remaining, filepath.Join(tempDir, "timelapse_year_2026.webm"))
 	assert.Contains(t, remaining, filepath.Join(tempDir, "timelapse_year_2025.webm"))
+}
+
+// --- prepareSnapshotsForBatch tests ---
+
+func makeSnapshotFile(t *testing.T, dir, name string, size int) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	os.WriteFile(path, bytes.Repeat([]byte("J"), size), 0644)
+	return path
+}
+
+func TestPrepareSnapshotsForBatch_FiltersSmallFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	valid1 := makeSnapshotFile(t, dir, "valid1.jpg", int(minValidSnapshotBytes))
+	valid2 := makeSnapshotFile(t, dir, "valid2.jpg", int(minValidSnapshotBytes)+500)
+	_ = makeSnapshotFile(t, dir, "tiny.jpg", int(minValidSnapshotBytes)-1)
+	_ = makeSnapshotFile(t, dir, "zero.jpg", 0)
+
+	result := prepareSnapshotsForBatch([]string{valid1, valid2,
+		filepath.Join(dir, "tiny.jpg"),
+		filepath.Join(dir, "zero.jpg"),
+		filepath.Join(dir, "missing.jpg"),
+	}, 0)
+
+	assert.Equal(t, []string{valid1, valid2}, result, "only files at or above minValidSnapshotBytes should pass")
+}
+
+func TestPrepareSnapshotsForBatch_CapsAtMaxFrames(t *testing.T) {
+	dir := t.TempDir()
+
+	var files []string
+	for i := 0; i < 10; i++ {
+		f := makeSnapshotFile(t, dir, fmt.Sprintf("snap%02d.jpg", i), int(minValidSnapshotBytes)+i)
+		files = append(files, f)
+	}
+
+	result := prepareSnapshotsForBatch(files, 5)
+
+	assert.Len(t, result, 5, "result should be capped at maxFrames")
+	// Should keep the most recent (last) 5
+	assert.Equal(t, files[5:], result, "should keep the most recent frames when capping")
+}
+
+func TestPrepareSnapshotsForBatch_NoCap(t *testing.T) {
+	dir := t.TempDir()
+
+	var files []string
+	for i := 0; i < 8; i++ {
+		f := makeSnapshotFile(t, dir, fmt.Sprintf("snap%02d.jpg", i), int(minValidSnapshotBytes)+i)
+		files = append(files, f)
+	}
+
+	result := prepareSnapshotsForBatch(files, 0)
+	assert.Len(t, result, 8, "maxFrames=0 disables the cap")
+}
+
+func TestPrepareSnapshotsForBatch_EmptyInput(t *testing.T) {
+	result := prepareSnapshotsForBatch(nil, 100)
+	assert.Empty(t, result)
+}
+
+// --- buildConcatList size filter test ---
+
+func TestBuildConcatList_FiltersSmallFiles(t *testing.T) {
+	_, cleanup := setupTest(t)
+	defer cleanup()
+
+	dir := config.AppConfig.DataDir
+	validFile := makeSnapshotFile(t, dir, "v.jpg", int(minValidSnapshotBytes))
+	_ = makeSnapshotFile(t, dir, "tiny.jpg", int(minValidSnapshotBytes)-1)
+	missing := filepath.Join(dir, "missing.jpg")
+
+	path, err := buildConcatList("test", []string{validFile, filepath.Join(dir, "tiny.jpg"), missing})
+	assert.NoError(t, err)
+	defer os.Remove(path)
+
+	content, err := os.ReadFile(path)
+	assert.NoError(t, err)
+	assert.Contains(t, string(content), filepath.ToSlash(validFile), "valid file must appear in concat list")
+	assert.NotContains(t, string(content), "tiny.jpg", "below-min file must not appear in concat list")
+	assert.NotContains(t, string(content), "missing.jpg", "missing file must not appear in concat list")
+}
+
+func TestBuildConcatList_AllInvalid(t *testing.T) {
+	_, cleanup := setupTest(t)
+	defer cleanup()
+
+	dir := config.AppConfig.DataDir
+	_ = makeSnapshotFile(t, dir, "tiny.jpg", int(minValidSnapshotBytes)-1)
+
+	_, err := buildConcatList("test", []string{filepath.Join(dir, "tiny.jpg")})
+	assert.Error(t, err, "all-invalid input should return an error")
+	assert.Contains(t, err.Error(), "no valid snapshots")
 }

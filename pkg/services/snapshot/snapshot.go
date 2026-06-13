@@ -18,6 +18,15 @@ import (
 	"time-machine/pkg/util"
 )
 
+// minSnapshotBytes is the smallest a valid camera JPEG is expected to be.
+// An NVR that is up but whose camera is offline can return HTTP 200 with an empty
+// or near-empty body. Snapshots below this threshold are discarded on capture.
+const minSnapshotBytes int64 = 2048
+
+// consecutiveFailureWarnThreshold is the number of back-to-back snapshot failures
+// that triggers a loud log warning about potential NVR/camera connectivity issues.
+const consecutiveFailureWarnThreshold = 3
+
 // hqCapable is the camera's auto-detected HQ snapshot capability, set at startup.
 // It is only written once during InitSnapshotSettings and is safe to read concurrently.
 var hqCapable bool
@@ -122,16 +131,24 @@ func GetEffectiveSnapshotQuality() string {
 // --- CORE LOGIC (Scheduler and API calls) ---
 
 func StartSnapshotScheduler() {
+	var consecutiveFailures int
 	for {
-		TakeSnapshot()
+		if TakeSnapshot() {
+			consecutiveFailures = 0
+		} else {
+			consecutiveFailures++
+			if consecutiveFailures >= consecutiveFailureWarnThreshold {
+				log.Printf("WARNING: %d consecutive snapshot failures — NVR may be unreachable or returning invalid data; check connectivity", consecutiveFailures)
+			}
+		}
 		time.Sleep(time.Duration(settings.GetInt("snapshot.interval_sec", 3600)) * time.Second)
 	}
 }
 
-func TakeSnapshot() {
+func TakeSnapshot() bool {
 	if config.AppConfig.UFPHost == "" || config.AppConfig.UFPAPIKey == "" || config.AppConfig.TargetCameraID == "" {
 		log.Println("Snapshot Error: UniFi Protect credentials missing.")
-		return
+		return false
 	}
 
 	apiURL := fmt.Sprintf("%s/proxy/protect/integration/v1/cameras/%s/snapshot", config.AppConfig.UFPHost, config.AppConfig.TargetCameraID)
@@ -150,53 +167,68 @@ func TakeSnapshot() {
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		log.Printf("Error creating snapshot request: %v", err)
-		return
+		return false
 	}
 	req.Header.Set("X-Api-Key", config.AppConfig.UFPAPIKey)
 
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("Snapshot API request failed: %v", err)
-		return
+		return false
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		log.Printf("UniFi API returned status code %d: %s", resp.StatusCode, string(bodyBytes))
-		return
+		return false
 	}
 
 	now := time.Now()
 
-	// --- New Directory Structure Logic ---
 	// Path: snapshots/YYYY-MM/DD/HH/
-	// AI did this date, I hate it... will change later
 	snapshotDir := filepath.Join(config.AppConfig.SnapshotsDir, now.Format("2006-01"), now.Format("02"), now.Format("15"))
 	if err := os.MkdirAll(snapshotDir, 0755); err != nil {
 		log.Printf("Error creating snapshot directory %s: %v", snapshotDir, err)
-		return
+		return false
 	}
 
-	// Save the snapshot for the timelapse
 	fileName := now.Format("2006-01-02-15-04-05") + ".jpg"
 	snapshotPath := filepath.Join(snapshotDir, fileName)
 	out, err := os.Create(snapshotPath)
 	if err != nil {
 		log.Printf("Error creating file %s: %v", snapshotPath, err)
-		return
+		return false
 	}
-	defer out.Close()
 
-	// Tee the response body to write to multiple places if needed
-	if _, err = io.Copy(out, resp.Body); err != nil {
-		log.Printf("Error saving snapshot to file %s: %v", snapshotPath, err)
-		return
+	_, copyErr := io.Copy(out, resp.Body)
+	out.Close() // close before stat so the OS flushes metadata
+
+	if copyErr != nil {
+		log.Printf("Error saving snapshot to file %s: %v", snapshotPath, copyErr)
+		os.Remove(snapshotPath)
+		return false
 	}
+
+	// Reject snapshots that are too small to be a real camera JPEG.
+	// An NVR that is up but whose camera is offline can return HTTP 200
+	// with an empty or near-empty body that would produce corrupt video frames.
+	info, statErr := os.Stat(snapshotPath)
+	if statErr != nil {
+		log.Printf("Snapshot %s: stat failed after write: %v", snapshotPath, statErr)
+		os.Remove(snapshotPath)
+		return false
+	}
+	if info.Size() < minSnapshotBytes {
+		log.Printf("Snapshot %s discarded: %d bytes is below minimum threshold (%d) — NVR may be returning empty/placeholder data",
+			snapshotPath, info.Size(), minSnapshotBytes)
+		os.Remove(snapshotPath)
+		return false
+	}
+
 	log.Printf("Snapshot saved: %s", snapshotPath)
 
-	// --- New Gallery Logic ---
-	// Save the first snapshot of the hour to the gallery
+	// Save the first snapshot of the hour to the gallery.
 	galleryFileName := now.Format("2006-01-02-15") + ".jpg"
 	galleryPath := filepath.Join(config.AppConfig.GalleryDir, galleryFileName)
 
@@ -208,11 +240,12 @@ func TakeSnapshot() {
 		}
 	}
 
-	// Update the latest_snapshot.jpg for the video player poster
+	// Update the latest_snapshot.jpg for the video player poster.
 	latestPath := filepath.Join(config.AppConfig.DataDir, "latest_snapshot.jpg")
 	if err := util.CopyFile(snapshotPath, latestPath); err != nil {
 		log.Printf("Error copying snapshot to latest_snapshot.jpg: %v", err)
 	}
+	return true
 }
 
 func GetCameraStatus() map[string]interface{} {

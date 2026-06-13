@@ -30,6 +30,15 @@ var (
 	onceDetectCapabilities sync.Once
 )
 
+// minValidSnapshotBytes is the minimum file size accepted as a valid JPEG snapshot.
+// Matches the threshold used at capture time in the snapshot package.
+const minValidSnapshotBytes int64 = 2048
+
+// defaultMaxBatchFrames caps the number of frames fed to a single FFmpeg invocation.
+// A large batch of corrupt-but-non-zero files can cause FFmpeg to OOM; this is the
+// safety net after the per-frame size filter.
+const defaultMaxBatchFrames = 5000
+
 // getFFmpegThreads returns the configured FFmpeg thread count.
 // A setting of 0 means auto-detect: use CPU count capped at 8.
 func getFFmpegThreads() int {
@@ -89,8 +98,8 @@ func computeBufSize(maxBitrate string) string {
 var createVideoSegment = func(imagePath, segmentPath string) error {
 	// 1. Input Validation
 	info, err := os.Stat(imagePath)
-	if err != nil || info.Size() == 0 {
-		return fmt.Errorf("invalid snapshot file (not found or zero size): %s", imagePath)
+	if err != nil || info.Size() < minValidSnapshotBytes {
+		return fmt.Errorf("invalid snapshot file (below minimum size %d bytes): %s", minValidSnapshotBytes, imagePath)
 	}
 
 	log.Printf("Creating video segment for %s using codec %s with %d threads...", filepath.Base(imagePath), PreferredVideoCodec, getFFmpegThreads())
@@ -540,7 +549,7 @@ func buildConcatList(name string, snapshots []string) (string, error) {
 	var valid []string
 	for _, s := range snapshots {
 		info, err := os.Stat(s)
-		if err == nil && info.Size() > 0 {
+		if err == nil && info.Size() >= minValidSnapshotBytes {
 			valid = append(valid, s)
 		}
 	}
@@ -775,6 +784,31 @@ var filterSnapshots = func(allFiles []string, cfg models.TimelapseConfig, target
 	sort.Strings(filtered)
 	return filtered
 }
+// prepareSnapshotsForBatch filters out missing or undersized snapshots and caps the
+// result to maxFrames (keeping the most recent), preventing FFmpeg OOM on large batches.
+// Pass maxFrames ≤ 0 to disable the cap.
+func prepareSnapshotsForBatch(snapshotFiles []string, maxFrames int) []string {
+	var valid []string
+	for _, snapshot := range snapshotFiles {
+		info, err := os.Stat(snapshot)
+		if err != nil || info.Size() < minValidSnapshotBytes {
+			if err == nil {
+				log.Printf("Skipping snapshot below minimum size (%d bytes): %s", info.Size(), snapshot)
+			} else {
+				log.Printf("Skipping missing snapshot: %s", snapshot)
+			}
+			continue
+		}
+		valid = append(valid, snapshot)
+	}
+	if maxFrames > 0 && len(valid) > maxFrames {
+		log.Printf("WARNING: %d valid frames exceeds batch limit (%d); keeping most recent %d frames to prevent OOM",
+			len(valid), maxFrames, maxFrames)
+		valid = valid[len(valid)-maxFrames:]
+	}
+	return valid
+}
+
 var regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string, archive bool) error {
 	if len(snapshotFiles) == 0 {
 		log.Println("No snapshots to generate timelapse.")
@@ -784,16 +818,8 @@ var regenerateFullTimelapse = func(snapshotFiles []string, outputFileName string
 	tempVideoPath := filepath.Join(config.AppConfig.DataDir, "temp_"+outputFileName)
 	finalVideoPath := filepath.Join(config.AppConfig.DataDir, outputFileName)
 
-	// Validate files with a fast stat check — no FFmpeg call per frame.
-	var validSnapshots []string
-	for _, snapshot := range snapshotFiles {
-		info, err := os.Stat(snapshot)
-		if err != nil || info.Size() == 0 {
-			log.Printf("Skipping missing or empty snapshot: %s", snapshot)
-			continue
-		}
-		validSnapshots = append(validSnapshots, snapshot)
-	}
+	maxFrames := settings.GetInt("video.max_batch_frames", defaultMaxBatchFrames)
+	validSnapshots := prepareSnapshotsForBatch(snapshotFiles, maxFrames)
 	if len(validSnapshots) == 0 {
 		log.Printf("No valid snapshots found to generate timelapse %s.", outputFileName)
 		return nil
@@ -904,15 +930,16 @@ var CleanupSnapshots = func() {
 	corruptFiles := 0
 
 	for _, file := range allSnapshots {
-		// Check for 0-byte files
+		// Remove files too small to be a real JPEG — these are placeholder responses
+		// saved during NVR outages before the minimum-size guard was applied.
 		info, err := os.Stat(file)
-		if err == nil && info.Size() == 0 {
-			log.Printf("Found zero-byte snapshot, deleting: %s", file)
+		if err == nil && info.Size() < minValidSnapshotBytes {
+			log.Printf("Found undersized snapshot (%d bytes), deleting: %s", info.Size(), file)
 			if err := os.Remove(file); err != nil {
-				log.Printf("Warning: failed to remove zero-byte snapshot %s: %v", file, err)
+				log.Printf("Warning: failed to remove undersized snapshot %s: %v", file, err)
 			} else {
 				corruptFiles++
-				continue // Don't process further
+				continue
 			}
 		}
 

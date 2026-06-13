@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,13 +17,19 @@ import (
 	"time-machine/pkg/services/settings"
 )
 
+// fakeJPEGBody returns a byte slice of at least minSnapshotBytes that looks like
+// camera data. Real content doesn't matter for unit tests — only the size does.
+func fakeJPEGBody() []byte {
+	return bytes.Repeat([]byte("X"), int(minSnapshotBytes)+100)
+}
+
 var mockServer *httptest.Server
 
 func setupMockServer() {
 	mockServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "snapshot") {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("jpeg_image_data"))
+			w.Write(fakeJPEGBody())
 		} else if strings.Contains(r.URL.Path, "cameras") {
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(map[string]interface{}{
@@ -96,7 +103,8 @@ func TestTakeSnapshot(t *testing.T) {
 	// Force HQ on so the snapshot URL uses ?highQuality=true
 	settings.Set("snapshot.hq_params", "true")
 	hqCapable = true
-	TakeSnapshot()
+	ok := TakeSnapshot()
+	assert.True(t, ok, "TakeSnapshot should return true when NVR returns a valid-sized body")
 
 	now := time.Now()
 	snapshotDir := filepath.Join(config.AppConfig.SnapshotsDir, now.Format("2006-01"), now.Format("02"), now.Format("15"))
@@ -108,6 +116,102 @@ func TestTakeSnapshot(t *testing.T) {
 
 	latestPath := filepath.Join(config.AppConfig.DataDir, "latest_snapshot.jpg")
 	assert.FileExists(t, latestPath)
+}
+
+func setupSnapshotDirs(t *testing.T) {
+	t.Helper()
+	tempDir := t.TempDir()
+	config.AppConfig.DataDir = tempDir
+	config.AppConfig.SnapshotsDir = filepath.Join(tempDir, "snapshots")
+	config.AppConfig.GalleryDir = filepath.Join(tempDir, "gallery")
+	os.MkdirAll(config.AppConfig.SnapshotsDir, 0755)
+	os.MkdirAll(config.AppConfig.GalleryDir, 0755)
+}
+
+func TestTakeSnapshot_EmptyBodyDiscarded(t *testing.T) {
+	// NVR returns HTTP 200 with an empty body (camera offline but NVR is up).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		// write nothing
+	}))
+	defer srv.Close()
+
+	setupSnapshotDirs(t)
+	config.AppConfig.UFPHost = srv.URL
+	config.AppConfig.UFPAPIKey = "key"
+	config.AppConfig.TargetCameraID = "cam"
+
+	ok := TakeSnapshot()
+	assert.False(t, ok, "empty response body should be rejected")
+
+	// No snapshot file should remain on disk.
+	snaps, _ := filepath.Glob(filepath.Join(config.AppConfig.SnapshotsDir, "*/*/*/*.jpg"))
+	assert.Empty(t, snaps, "no snapshot file should be left after an empty-body rejection")
+}
+
+func TestTakeSnapshot_TinyBodyDiscarded(t *testing.T) {
+	// NVR returns HTTP 200 with a body smaller than minSnapshotBytes.
+	tinyBody := bytes.Repeat([]byte("x"), int(minSnapshotBytes)-1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write(tinyBody)
+	}))
+	defer srv.Close()
+
+	setupSnapshotDirs(t)
+	config.AppConfig.UFPHost = srv.URL
+	config.AppConfig.UFPAPIKey = "key"
+	config.AppConfig.TargetCameraID = "cam"
+
+	ok := TakeSnapshot()
+	assert.False(t, ok, "below-threshold body should be rejected")
+
+	snaps, _ := filepath.Glob(filepath.Join(config.AppConfig.SnapshotsDir, "*/*/*/*.jpg"))
+	assert.Empty(t, snaps, "no snapshot file should be left after a size rejection")
+}
+
+func TestTakeSnapshot_NonOKStatusRejected(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("service unavailable"))
+	}))
+	defer srv.Close()
+
+	setupSnapshotDirs(t)
+	config.AppConfig.UFPHost = srv.URL
+	config.AppConfig.UFPAPIKey = "key"
+	config.AppConfig.TargetCameraID = "cam"
+
+	ok := TakeSnapshot()
+	assert.False(t, ok, "non-200 status should be rejected")
+
+	snaps, _ := filepath.Glob(filepath.Join(config.AppConfig.SnapshotsDir, "*/*/*/*.jpg"))
+	assert.Empty(t, snaps, "no snapshot file should be created for a non-200 response")
+}
+
+func TestTakeSnapshot_ValidBodyAccepted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write(fakeJPEGBody())
+	}))
+	defer srv.Close()
+
+	setupSnapshotDirs(t)
+	database.InitDB()
+	settings.Init()
+	config.AppConfig.UFPHost = srv.URL
+	config.AppConfig.UFPAPIKey = "key"
+	config.AppConfig.TargetCameraID = "cam"
+
+	ok := TakeSnapshot()
+	assert.True(t, ok, "valid-sized body should be accepted")
+
+	snaps, _ := filepath.Glob(filepath.Join(config.AppConfig.SnapshotsDir, "*/*/*/*.jpg"))
+	assert.Len(t, snaps, 1, "exactly one snapshot file should be saved")
+
+	info, err := os.Stat(snaps[0])
+	assert.NoError(t, err)
+	assert.GreaterOrEqual(t, info.Size(), minSnapshotBytes, "saved snapshot must meet minimum size")
 }
 
 func TestGetCameraStatus(t *testing.T) {
