@@ -1,205 +1,127 @@
 # UniFi Time-Machine
 
-UniFi Time-Machine is a Go application that creates beautiful timelapse videos from your UniFi Protect cameras. It provides a web interface you can access directly, or behind a reverse proxy/load balancer.
+Automatic timelapse videos from your UniFi Protect cameras, with a clean web interface to watch them.
 
+## Screenshots
 
+**Daily View**
+<img width="1663" height="1813" alt="Daily view" src="https://github.com/user-attachments/assets/f8a84e85-a78e-41dd-857c-320df74924cc" />
 
-## Web Console - Daily View
-<img width="1663" height="1813" alt="image" src="https://github.com/user-attachments/assets/f8a84e85-a78e-41dd-857c-320df74924cc" />
+**Gallery**
+<img width="1651" height="996" alt="Gallery" src="https://github.com/user-attachments/assets/e730967b-b32d-449b-ae96-f258d2a907e6" />
 
-## Web Console - Gallery
-<img width="1651" height="996" alt="image" src="https://github.com/user-attachments/assets/e730967b-b32d-449b-ae96-f258d2a907e6" />
+**Admin Panel**
+<img width="1238" height="1038" alt="Admin panel" src="https://github.com/user-attachments/assets/17a73cef-4e40-44f3-93d3-e71541fb9322" />
 
-## Web Console - Admin Panel
-<img width="1238" height="1038" alt="image" src="https://github.com/user-attachments/assets/17a73cef-4e40-44f3-93d3-e71541fb9322" />
-
-## Web Console - Share Time Lapse
-
+---
 
 ## Features
 
--   **Automatic Timelapse Generation**: Periodically generates timelapse videos from your UniFi Protect camera snapshots.
--   **Calendar-Based Timelapses**: Four timelapse types — daily (24 h), weekly (Mon–Sun), monthly, and yearly — each with configurable retention counts. No rolling-window drift.
--   **Daytime-First Image Selection**: Weekly and monthly lapses use gallery images filtered to your configured daylight hours, and daily pattern picks the image closest to noon — no more night images.
--   **Daily Gallery**: Takes hourly images of your target camera and builds a 24-hour gallery; sort and filter by date.
--   **Web Interface**: A simple, clean web UI to view the latest snapshots, watch timelapses, and check system status.
--   **Multi-Arch Support**: Docker images are available for both x86 (amd64) and ARM64 architectures.
--   **Configurable**: Most settings can be configured using environment variables.
--   **Efficient**: Uses a background worker to process jobs and a caching mechanism to keep the UI responsive.
+- Captures hourly snapshots and builds **daily, weekly, monthly, and yearly** timelapses automatically
+- **24-hour gallery** — browse any day's images, sort and filter by date
+- **Share links** — generate a time-limited public link to any timelapse
+- **Daylight filtering** — weekly and monthly lapses skip night images automatically
+- **HLS adaptive streaming** — smooth playback on any connection
+- All settings configured in the **Admin → Settings** panel — no restarts needed
+- Multi-arch Docker image (amd64 + ARM64)
 
-## Getting Started
+---
 
-There are several ways to run UniFi Time-Machine. The easiest way is to use Docker and highly recommended.
+## Quick Start
 
-### Versions
-Versions are linked to Git Tags on this repo such as `v0.0.1` and pushed to `Dockerhub`. Other tags of interest;
+### Option A — Docker Compose (recommended)
 
-- dev ( latest build on dev branches )
-- latest ( builds off main branch ) - will be deprecated in favour of git hash/sha256 builds.
-- tags eg: `v1.2.3` ( recommended )
+1. Copy `.env` and fill in the four required values:
 
-From the initial release, a security update was made to the container `user` which is now `appuser` with a UID/GID of `1000`, this may break your existing database on disk and require a `chown` to fix permissions. See release notes for details. 
+   ```
+   UFP_HOST=192.168.1.1
+   UFP_API_KEY=<your api key>
+   TARGET_CAMERA_ID=<your camera id>
+   APP_KEY=<run: head -c 32 /dev/urandom | base64>
+   ADMIN_PASSWORD=<choose a password>
+   ```
 
-If leveraging a docker bind mount or mapping, ensure you set this. `chown -R 1000:1000 data/` on the host directory!
+2. Start:
 
-### Running with Docker Compose (Recommended)
+   ```bash
+   docker compose up -d
+   ```
 
-This is the recommended way to run the application, as it simplifies the management of the container and its configuration.
+3. Open `http://localhost:8000` and log in with `admin` / your `ADMIN_PASSWORD`.
 
-1.  **Create a `.env` file**: Modify the provided `.env` file and fill in the values for your environment.
+### Option B — start.sh
 
-    At a minimum, you must set `UFP_API_KEY`, `TARGET_CAMERA_ID`, `APP_KEY`, and `ADMIN_PASSWORD`.
+Edit the values at the top of `start.sh`, then:
 
-    `UFP_API_KEY` is generated in your UI Console for the site. Integrations -> `New API Key`.
+```bash
+bash start.sh
+```
 
-    Note the API calls used within only leverage the `Protect` API Endpoints on `/v1/cameras/{id}` and `/v1/cameras/{id}/snapshot`.
+`UFP_API_KEY` and `APP_KEY` can also be exported in your shell before running rather than written into the script.
 
-    `TARGET_CAMERA_ID` is found my accessing your UI console, selecting the camera -> Settings and refer to the URL in your browser such as `https://192.168.1.1/protect/dashboard/all/sidepanel/device/<YOUR_CAMERA_ID>/manage`
+---
 
-2.  **Start the container**:
+## Finding your values
 
-    ```bash
-    docker-compose up -d
-    ```
+**`UFP_API_KEY`** — In your UniFi OS console go to **Integrations → New API Key**.
 
-3.  **Access the web UI**: The web UI will be available at `http://localhost:8000` (or the port you specified in `HTTP_PORT`). Login with `admin` as the user, and the password you defined in the startup variables. 
+**`TARGET_CAMERA_ID`** — Open the camera in the Protect web UI. The ID is in the URL:
+```
+https://192.168.1.1/protect/dashboard/all/sidepanel/device/<YOUR_CAMERA_ID>/manage
+```
 
-### Running with `start.sh`
+**`APP_KEY`** — A random secret used to sign sessions. Generate one:
+```bash
+head -c 32 /dev/urandom | base64
+```
 
-The `start.sh` script is a convenient way to run the application with Docker without using Docker Compose.
-
-1.  **Configure the script**: Open the `start.sh` script and edit the configuration variables at the top of the file. Note that variables like APP_KEY and UFP KEY are read from your environment. Pending you shell env, this is usually set via `export UFP_API_KEY` in files like your `~/.bash_profile` or `~/.bashrc`.
-
-2.  **Make the script executable**:
-
-    ```bash
-    chmod +x start.sh
-    ```
-
-3.  **Run the script**:
-
-    ```bash
-    ./start.sh
-    ```
-
-### Building the Docker Image
-
-If you want to build the Docker image yourself, you can use the `build.sh` script. This script builds a multi-arch image for `linux/amd64` and `linux/arm64`.
-
-1.  **Make the script executable**:
-
-    ```bash
-    chmod +x build.sh
-    ```
-
-2.  **Run the script**:
-
-    ```bash
-    ./build.sh [tag]
-    ```
-
-    The optional `tag` argument specifies the Docker image tag. If not provided, it defaults to `latest`.
-
-### Building from Source
-
-If you want to build the application from source, you'll need Go 1.25 or later installed. Using docker is recommended as we need CGO with SQLite and other dependencies that's much cleaner.
-
-1.  **Install dependencies**:
-
-    ```bash
-    go mod tidy
-    ```
-
-2.  **Build the binary**:
-
-    ```bash
-    CGO_ENABLED=1 GOOS=$GOOS GOARCH=$GOARCH go build -ldflags '-s -w -extldflags "-static"' -tags osusergo,netgo -o /unifi-time-machine ./cmd/server
-    ```
-
-3.  **Run the application**:
-
-    ```bash
-    ./unifi-time-machine
-    ```
-
-    You will need to set the required environment variables before running the application. Web folder must be accessible etc. 
+---
 
 ## Configuration
 
-The application is configured using environment variables. The `.env` file contains the full list with comments. Key variables are described below.
+Only these values need to be set in the environment. Everything else (snapshot interval, video quality, retention, formats, timezones, etc.) is configured in the **Admin → Settings** panel after first launch.
 
-### Required
+| Variable | Required | Description |
+|---|---|---|
+| `UFP_HOST` | Yes | IP or hostname of your UniFi Protect controller |
+| `UFP_API_KEY` | Yes | API key from UniFi OS → Integrations |
+| `TARGET_CAMERA_ID` | Yes | Camera ID from the Protect URL |
+| `APP_KEY` | Yes | Base64 secret for session signing |
+| `ADMIN_PASSWORD` | Yes | Initial password for the `admin` account |
+| `TZ` | No | Container timezone (e.g. `Australia/Sydney`) |
+| `GIN_MODE` | No | Set to `release` for production (default) |
 
-| Variable | Description |
+---
+
+## Docker image tags
+
+| Tag | Description |
 |---|---|
-| `UFP_HOST` | IP or hostname of your UniFi Protect controller |
-| `UFP_API_KEY` | API key from UniFi OS Console → Integrations |
-| `TARGET_CAMERA_ID` | Camera ID found in the Protect URL when viewing the camera |
-| `APP_KEY` | Base64-encoded secret key (`head -c 32 /dev/urandom \| base64`) |
-| `ADMIN_PASSWORD` | Password for the initial `admin` account (required on first run) |
+| `v1.2.3` | Specific release — recommended for production |
+| `latest` | Latest build from `main` |
+| `dev` | Latest build from development branches |
 
-### Snapshot & Video
+Pull from Docker Hub: `mbern/unifi-time-machine`
 
-| Variable | Default | Description |
-|---|---|---|
-| `TIMELAPSE_INTERVAL` | `3600` | Seconds between snapshots (e.g. `3600` = hourly) |
-| `VIDEO_CRON_INTERVAL` | `300` | Seconds between timelapse generation passes |
-| `VIDEO_QUALITY` | `medium` | Encoding quality: `low`, `medium`, `high`, `ultra` |
-| `DAYS_OF_24_HOUR_SNAPSHOTS` | `30` | How many daily 24-hour timelapses to keep |
-| `SNAPSHOT_RETENTION_DAYS` | `30` | How long to keep raw snapshot files |
-| `GALLERY_RETENTION_DAYS` | `365` | How long to keep hourly gallery images |
-| `SHARE_LINK_EXPIRY_HOURS` | `4` | Shared link lifetime in hours (`0` = unlimited) |
+---
 
-### Timelapse Types & Retention
+## Permissions
 
-UniFi Time-Machine generates four categories of timelapse, all sourced from the 365-day hourly gallery so they are not limited by raw snapshot retention.
+The container runs as `appuser` (UID/GID `1000`). If you're using a bind-mounted data directory, set ownership on the host:
 
-| Type | Source | Frame selection | Named as |
-|---|---|---|---|
-| **Daily** | Raw snapshots | Every captured image for that calendar day | `timelapse_24_hour_YYYY-MM-DD.webm` |
-| **Weekly** | Gallery (hourly) | One image per daylight hour, Mon–Sun | `timelapse_week_YYYY-MM-DD.webm` (Monday date) |
-| **Monthly** | Gallery (hourly) | One image per day, closest to noon | `timelapse_month_YYYY-MM.webm` |
-| **Yearly** | Gallery (hourly) | ~5 images per day (every 3 h) | `timelapse_year_YYYY.webm` |
+```bash
+chown -R 1000:1000 ./data
+```
 
-| Variable | Default | Description |
-|---|---|---|
-| `WEEKLY_LAPSES_TO_KEEP` | `4` | Number of calendar-week timelapses to retain |
-| `MONTHLY_LAPSES_TO_KEEP` | `3` | Number of calendar-month timelapses to retain |
-
-### Daylight Filtering
-
-These settings apply to weekly, monthly, and yearly timelapses. The 24-hour daily timelapse always includes all hours.
-
-| Variable | Default | Description |
-|---|---|---|
-| `DAYLIGHT_START_HOUR` | `7` | Earliest hour (0–23) included in non-daily lapses |
-| `DAYLIGHT_END_HOUR` | `19` | Latest hour (exclusive) included in non-daily lapses |
-| `DAYLIGHT_TARGET_HOUR` | `12` | Preferred hour for daily-pattern selection (monthly lapse picks the image closest to this hour each day) |
-
-### Display
-
-| Variable | Default | Description |
-|---|---|---|
-| `DATE_FORMAT` | `DD/MM/YYYY` | Date display format: `DD/MM/YYYY`, `MM/DD/YYYY`, `YYYY-MM-DD` |
-| `TIME_FORMAT` | `12h` | Time display format: `12h` or `24h` |
-| `TZ` | — | Container timezone (e.g. `Australia/Sydney`, `America/New_York`) |
-
-### Migrating from older versions
-
-Versions prior to this release used rolling-window timelapses named `timelapse_1_week.webm`, `timelapse_1_month.webm`, and `timelapse_1_year.webm`. These files are no longer generated or cleaned up automatically. You can safely delete them from your data directory — the new calendar-named files will appear automatically on the next generation cycle.
-
-## Caveats
-This project is still in its early days and bugs etc are expected alongside major changes. A 1.0.0 release would represent something of more mature stability after more field testing and feedback.
-
-
-
-## Next Features
-* GPU Support
-* More than one camera in your Protect app?
-* Cloud Backups & Tiered Storage for Edge/IOT deployments
-* Public URL Sharing - Done!
-* AI/Video Summary - summarise an uploaded video such as a mp4 from other systems and create a summary of detected objects, events etc
-* Payment/Cashier tracker for retail environments based on payment terminal transactions outside of shopify for the rest of the world
+---
 
 ## Contributing
-I welcome any contributions or ideas.
+
+Issues and PRs are welcome. See [DEVGUIDE.md](DEVGUIDE.md) for build instructions and developer notes.
+
+## Roadmap
+
+- GPU encoding support
+- Multi-camera support
+- Cloud / tiered storage for edge deployments
+- AI video summaries

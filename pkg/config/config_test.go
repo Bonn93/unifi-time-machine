@@ -41,17 +41,3 @@ func TestLoadConfig(t *testing.T) {
 	assert.True(t, strings.HasSuffix(AppConfig.SnapshotsDir, "snapshots"))
 	assert.True(t, strings.HasSuffix(AppConfig.GalleryDir, "gallery"))
 }
-
-func TestGetEnvAsInt(t *testing.T) {
-	os.Setenv("TEST_INT", "123")
-	val := getEnvAsInt("TEST_INT", 456)
-	assert.Equal(t, 123, val)
-
-	os.Unsetenv("TEST_INT")
-	val = getEnvAsInt("TEST_INT", 456)
-	assert.Equal(t, 456, val)
-
-	os.Setenv("TEST_INT", "abc")
-	val = getEnvAsInt("TEST_INT", 456)
-	assert.Equal(t, 456, val)
-}
