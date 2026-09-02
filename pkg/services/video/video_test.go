@@ -736,7 +736,16 @@ func TestCleanOldVideos_Monthly(t *testing.T) {
 	settings.Set("video.monthly_keep", "2")
 	settings.Invalidate()
 
-	for _, month := range []string{"2026-02", "2026-03", "2026-04", "2026-05"} {
+	// cleanMonthlyVideos anchors retention on last month (the newest possible
+	// completed month), so fixture months must be computed relative to
+	// time.Now() rather than hardcoded — otherwise this test goes stale and
+	// starts failing once real time moves past the hardcoded dates.
+	anchor := time.Now().AddDate(0, -1, 0)
+	months := make([]string, 4)
+	for i := range months {
+		months[i] = anchor.AddDate(0, -(3 - i), 0).Format("2006-01")
+	}
+	for _, month := range months {
 		os.WriteFile(filepath.Join(tempDir, "timelapse_month_"+month+".webm"), []byte("x"), 0644)
 	}
 
@@ -744,8 +753,8 @@ func TestCleanOldVideos_Monthly(t *testing.T) {
 
 	remaining, _ := filepath.Glob(filepath.Join(tempDir, "timelapse_month_*.webm"))
 	assert.Len(t, remaining, 2, "should keep only the 2 newest monthly timelapses")
-	assert.Contains(t, remaining, filepath.Join(tempDir, "timelapse_month_2026-05.webm"))
-	assert.Contains(t, remaining, filepath.Join(tempDir, "timelapse_month_2026-04.webm"))
+	assert.Contains(t, remaining, filepath.Join(tempDir, "timelapse_month_"+months[3]+".webm"))
+	assert.Contains(t, remaining, filepath.Join(tempDir, "timelapse_month_"+months[2]+".webm"))
 }
 
 func TestCleanOldVideos_Yearly(t *testing.T) {

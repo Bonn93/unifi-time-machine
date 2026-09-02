@@ -210,8 +210,28 @@ func TestHandleForceGenerate(t *testing.T) {
 	assert.Equal(t, http.StatusFound, w.Code)
 	assert.Equal(t, "/", w.Header().Get("Location"))
 
-	// Allow the background job to complete
-	time.Sleep(100 * time.Millisecond)
+	// HandleForceGenerate enqueues jobs in a background goroutine; poll until
+	// the job count stabilizes instead of a fixed sleep, so this isn't flaky
+	// on slow/loaded runners (e.g. emulated CI builders), where a short sleep
+	// can let the test's t.TempDir() cleanup delete the DB out from under the
+	// still-running goroutine.
+	deadline := time.Now().Add(5 * time.Second)
+	var count, lastCount, stableChecks int
+	for time.Now().Before(deadline) {
+		err := database.GetDB().QueryRow("SELECT COUNT(*) FROM jobs").Scan(&count)
+		assert.NoError(t, err)
+		if count > 0 && count == lastCount {
+			stableChecks++
+			if stableChecks >= 3 {
+				break
+			}
+		} else {
+			stableChecks = 0
+		}
+		lastCount = count
+		time.Sleep(20 * time.Millisecond)
+	}
+	assert.Greater(t, count, 0, "expected background job enqueueing to complete")
 }
 
 func TestHandleCreateUser(t *testing.T) {
