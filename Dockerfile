@@ -1,5 +1,5 @@
 # --- Stage 1: Test Runner ---
-FROM --platform=$BUILDPLATFORM golang:1.27-bookworm AS tester
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/go:latest-dev@sha256:db631352b4f461fe8f4ae8d23b9a00bbe3e77992ccc43649afe21ae9a56dac8b AS tester
 
 WORKDIR /app
 
@@ -9,51 +9,66 @@ COPY . .
 # Run tests
 RUN go test -v ./...
 
-# --- Stage 2: Builder (Using a Debian-based Go image) ---
-# golang:1.22-bullseye is a good choice for a stable build environment
-FROM --platform=$BUILDPLATFORM golang:1.27-bookworm AS builder
+# --- Stage 2: Builder ---
+# Built natively for each target platform: the binary links SQLite via cgo,
+# which cannot cross-compile without a cross toolchain.
+FROM cgr.dev/chainguard/go:latest-dev@sha256:db631352b4f461fe8f4ae8d23b9a00bbe3e77992ccc43649afe21ae9a56dac8b AS builder
 
 # Copy source from the tester stage
 COPY --from=tester /app /app
 WORKDIR /app
 
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
-RUN echo "I am running on $BUILDPLATFORM, building for $TARGETPLATFORM"
-
 # Build the final application binary
 # Static linking is recommended for smaller, self-contained binaries on Linux
-ARG GOOS
-ARG GOARCH
-RUN CGO_ENABLED=1 GOOS=$GOOS GOARCH=$GOARCH go build -ldflags '-s -w -extldflags "-static"' -tags osusergo,netgo -o /unifi-time-machine ./cmd/server
+RUN CGO_ENABLED=1 go build -ldflags '-s -w -extldflags "-static"' -tags osusergo,netgo -o /unifi-time-machine ./cmd/server
 
+# --- Stage 3: FFmpeg Builder ---
+# Compile FFmpeg with the SVT-AV1, VP9 and x264 encoders the app uses
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:256c88bb066424045021090932d50be93c8e3f2ce3586707702a401b146f3e43 AS ffmpeg
 
-# --- Stage 3: Final Runtime Image ---
-# Use a lightweight Debian image that still supports necessary libraries
-FROM debian:bookworm-slim
+RUN apk add --no-cache \
+        build-base \
+        nasm \
+        pkgconf \
+        curl \
+        xz \
+        zlib-dev \
+        x264-dev \
+        svt-av1-dev \
+        libvpx-dev
 
-# Install FFmpeg and other necessary runtime packages
-# FFmpeg is crucial for video generation
+COPY scripts/build-ffmpeg.sh /usr/local/bin/build-ffmpeg.sh
+RUN sh /usr/local/bin/build-ffmpeg.sh /opt/ffmpeg
+
+# --- Stage 4: Runtime Image ---
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:256c88bb066424045021090932d50be93c8e3f2ce3586707702a401b146f3e43 AS runtime
+
+# Install runtime packages and the shared codec libraries FFmpeg links against
 # ca-certificates is necessary for HTTPS connections (even with InsecureSkipVerify: true)
 # tzdata ensures correct timezone handling if needed
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+COPY --from=ffmpeg /opt/ffmpeg/runtime-deps /tmp/ffmpeg-runtime-deps
+RUN apk add --no-cache \
         dumb-init \
-        ffmpeg \
         ca-certificates \
-        tzdata && \
-    rm -rf /var/lib/apt/lists/*
+        tzdata \
+        $(cat /tmp/ffmpeg-runtime-deps) && \
+    rm /tmp/ffmpeg-runtime-deps
+
+# FFmpeg is crucial for video generation
+COPY --from=ffmpeg /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
+
+# Fail the build if an encoder the app relies on is missing
+RUN ffmpeg -hide_banner -encoders | grep -q libsvtav1 && \
+    ffmpeg -hide_banner -encoders | grep -q libvpx-vp9 && \
+    ffmpeg -hide_banner -encoders | grep -q libx264
 
 # Make appuser with UID and GID 1000
-RUN groupadd -g 1000 appuser
-RUN useradd -m -u 1000 -g 1000 -s /bin/bash appuser
+RUN addgroup -g 1000 appuser && \
+    adduser -D -u 1000 -G appuser -s /bin/sh appuser
 
-# Create application data directory and set as a volume
-RUN mkdir -p /app/data
+# Create application data directory and set permissions
+RUN mkdir -p /app/data && chown -R appuser:appuser /app
 VOLUME /app/data
-
-# set permissions
-RUN chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
@@ -66,11 +81,26 @@ COPY --from=builder /unifi-time-machine /usr/local/bin/unifi-time-machine
 # --- ASSET COPY ---
 COPY web ./web
 
-RUN mkdir -p /app/data
-VOLUME /app/data
-
 # Expose the port
 EXPOSE 8080
 
 # Run the compiled application
 ENTRYPOINT ["/usr/bin/dumb-init", "--", "/usr/local/bin/unifi-time-machine"]
+
+# --- Stage 5: Vulnerability Scan ---
+# Scan the runtime filesystem with Grype; the build fails on findings at or
+# above GRYPE_FAIL_ON (negligible, low, medium, high, critical).
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/grype:latest@sha256:0c9e8971351cfb2fffb03a9198b062790eebd23fa6350bf40e0d4b9e58a4ecaa AS scan
+
+ARG GRYPE_FAIL_ON=critical
+ENV GRYPE_FAIL_ON_SEVERITY=${GRYPE_FAIL_ON} \
+    GRYPE_DB_CACHE_DIR=/tmp/grype-db
+
+COPY --from=runtime / /scan
+RUN ["grype", "dir:/scan", "-o", "table", "-o", "json=/tmp/grype-report.json"]
+
+# --- Stage 6: Final Image ---
+# Ship the scan report; copying it also makes the scan stage part of every build
+FROM runtime
+
+COPY --from=scan /tmp/grype-report.json /usr/share/unifi-time-machine/grype-report.json
