@@ -10,7 +10,7 @@ Notes for building, running locally, and contributing to UniFi Time-Machine.
 - **SQLite** — embedded database via `modernc.org/sqlite` (no system dependency)
 - **Gin** — HTTP framework
 - **HTMX + Bootstrap** — frontend, vanilla JS, no build step
-- **FFmpeg** — video encoding (injected at runtime via the Docker image)
+- **FFmpeg** — video encoding (compiled from source in the Docker image)
 
 The app follows 12-factor principles: config at the boundary (env vars for bootstrap, DB for everything else), stateless process, data in a mounted volume.
 
@@ -65,10 +65,11 @@ Requires `docker buildx` and a configured builder instance. The script creates o
 
 | File | Base | Notes |
 |---|---|---|
-| `Dockerfile` | `debian:bookworm-slim` | Standard image, recommended |
-| `Dockerfile_chainguard` | Chainguard | Minimal/hardened alternative |
+| `Dockerfile` | `cgr.dev/chainguard/wolfi-base` | Go built on `cgr.dev/chainguard/go`; FFmpeg compiled from source (SVT-AV1, VP9, x264) by `scripts/build-ffmpeg.sh` |
 
 The build pipeline runs tests (`go test -v ./...`) in a separate stage before compiling, so a failing test will abort the image build.
+
+The image is scanned with Grype before it is finalized. The build fails on any finding at or above `critical` (override with `--build-arg GRYPE_FAIL_ON=high`), and the JSON report ships in the image at `/usr/share/unifi-time-machine/grype-report.json`. Base images are pinned by digest and kept current by digestabot (`.github/workflows/digestabot.yml`).
 
 ---
 

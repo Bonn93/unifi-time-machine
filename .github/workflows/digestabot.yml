@@ -1,0 +1,27 @@
+name: Image digest update
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 1 * * *"
+
+permissions: {}
+
+jobs:
+  image-update:
+    name: Image digest update
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write # to push the updates
+      pull-requests: write # to open pull requests
+      id-token: write # to sign the commits using gitsign
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Update image digests
+        uses: chainguard-dev/digestabot@43222237fd8a07dc41a06ca13e931c95ce2cedac # v1.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,46 @@
+version: 1
+environment:
+  packages:
+  - go
+  - build-base
+  - glibc-dev
+  # FFmpeg build dependencies, matching the Dockerfile's ffmpeg stage
+  - nasm
+  - pkgconf
+  - curl
+  - xz
+  - zlib-dev
+  - x264-dev
+  - svt-av1-dev
+  - libvpx-dev
+checks:
+  vet:
+    cmd: go vet ./...
+    network:
+      egress: [proxy.golang.org, sum.golang.org]
+  test:
+    cmd: go test -v ./...
+    network:
+      egress: [proxy.golang.org, sum.golang.org]
+  build:
+    cmd: env CGO_ENABLED=1 go build -ldflags '-s -w -extldflags "-static"' -tags osusergo,netgo -o /tmp/unifi-time-machine ./cmd/server
+    network:
+      egress: [proxy.golang.org, sum.golang.org]
+  ffmpeg:
+    description: Build FFmpeg as the Dockerfile does and encode with each codec the app uses
+    script: |
+      set -eu
+      sh scripts/build-ffmpeg.sh /tmp/ffmpeg
+      export PATH="/tmp/ffmpeg/bin:$PATH"
+      cd "$(mktemp -d)"
+      ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=size=640x360:rate=30 -frames:v 30 \
+        -vf scale=out_color_matrix=bt709:out_range=tv,format=yuv420p frame%02d.jpg
+      ffmpeg -hide_banner -loglevel error -i frame01.jpg -c:v libsvtav1 -preset 10 -an -f webm -y av1.webm
+      ffmpeg -hide_banner -loglevel error -i frame01.jpg -c:v libvpx-vp9 -an -f webm -y vp9.webm
+      ffmpeg -hide_banner -loglevel error -framerate 30 -i frame%02d.jpg -c:v libx264 -preset veryfast \
+        -pix_fmt yuv420p -hls_time 1 -hls_playlist_type vod -f hls index.m3u8
+      for f in av1.webm vp9.webm index.m3u8; do
+        ffprobe -v error -show_entries stream=codec_name -of csv=p=0 "$f"
+      done
+    network:
+      egress: [ffmpeg.org]
