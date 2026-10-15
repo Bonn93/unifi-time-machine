@@ -1,0 +1,30 @@
+version: 1
+checks:
+  test:
+    environment:
+      packages:
+      - go-1.26
+      - gcc
+    steps:
+    - cmd:
+      - sh
+      - -e
+      - -c
+      - go vet ./...
+    - cmd:
+      - sh
+      - -e
+      - -c
+      - go test -v ./...
+  build:
+    environment:
+      packages:
+      - go-1.26
+      - gcc
+      - glibc-dev
+    steps:
+    - cmd:
+      - sh
+      - -e
+      - -c
+      - CGO_ENABLED=1 go build -ldflags '-s -w -extldflags "-static"' -tags osusergo,netgo -o /tmp/unifi-time-machine ./cmd/server
