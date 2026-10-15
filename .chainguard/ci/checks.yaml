@@ -5,6 +5,10 @@ checks:
       packages:
       - go-1.26
       - gcc
+    network:
+      egress:
+      - proxy.golang.org
+      - sum.golang.org
     steps:
     - cmd:
       - sh
@@ -22,6 +26,10 @@ checks:
       - go-1.26
       - gcc
       - glibc-dev
+    network:
+      egress:
+      - proxy.golang.org
+      - sum.golang.org
     steps:
     - cmd:
       - sh
