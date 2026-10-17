@@ -1,5 +1,5 @@
 # --- Stage 1: Test Runner ---
-FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/go:latest-dev@sha256:db631352b4f461fe8f4ae8d23b9a00bbe3e77992ccc43649afe21ae9a56dac8b AS tester
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/go:latest-dev@sha256:ec623ba822d649d14aa5c07f87545982da7daa482362691f9f5c798e715776f2 AS tester
 
 WORKDIR /app
 
@@ -12,7 +12,7 @@ RUN go test -v ./...
 # --- Stage 2: Builder ---
 # Built natively for each target platform: the binary links SQLite via cgo,
 # which cannot cross-compile without a cross toolchain.
-FROM cgr.dev/chainguard/go:latest-dev@sha256:db631352b4f461fe8f4ae8d23b9a00bbe3e77992ccc43649afe21ae9a56dac8b AS builder
+FROM cgr.dev/chainguard/go:latest-dev@sha256:ec623ba822d649d14aa5c07f87545982da7daa482362691f9f5c798e715776f2 AS builder
 
 # Copy source from the tester stage
 COPY --from=tester /app /app
