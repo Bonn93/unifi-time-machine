@@ -1,5 +1,5 @@
 # --- Stage 1: Test Runner ---
-FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/go:latest-dev@sha256:db631352b4f461fe8f4ae8d23b9a00bbe3e77992ccc43649afe21ae9a56dac8b AS tester
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/go:latest-dev@sha256:ed70318f7b4f2e4a82e1dbc363f7a13be3a5805081f86ed9d1ec02d2694c222f AS tester
 
 WORKDIR /app
 
@@ -12,7 +12,7 @@ RUN go test -v ./...
 # --- Stage 2: Builder ---
 # Built natively for each target platform: the binary links SQLite via cgo,
 # which cannot cross-compile without a cross toolchain.
-FROM cgr.dev/chainguard/go:latest-dev@sha256:db631352b4f461fe8f4ae8d23b9a00bbe3e77992ccc43649afe21ae9a56dac8b AS builder
+FROM cgr.dev/chainguard/go:latest-dev@sha256:ed70318f7b4f2e4a82e1dbc363f7a13be3a5805081f86ed9d1ec02d2694c222f AS builder
 
 # Copy source from the tester stage
 COPY --from=tester /app /app
@@ -24,7 +24,7 @@ RUN CGO_ENABLED=1 go build -ldflags '-s -w -extldflags "-static"' -tags osusergo
 
 # --- Stage 3: FFmpeg Builder ---
 # Compile FFmpeg with the SVT-AV1, VP9 and x264 encoders the app uses
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:256c88bb066424045021090932d50be93c8e3f2ce3586707702a401b146f3e43 AS ffmpeg
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:8509ee4351a2e501b7f98201f2e2642396e82020c61a589cacdcfe74b9de46c1 AS ffmpeg
 
 RUN apk add --no-cache \
         build-base \
@@ -41,7 +41,7 @@ COPY scripts/build-ffmpeg.sh /usr/local/bin/build-ffmpeg.sh
 RUN sh /usr/local/bin/build-ffmpeg.sh /opt/ffmpeg
 
 # --- Stage 4: Runtime Image ---
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:256c88bb066424045021090932d50be93c8e3f2ce3586707702a401b146f3e43 AS runtime
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:8509ee4351a2e501b7f98201f2e2642396e82020c61a589cacdcfe74b9de46c1 AS runtime
 
 # Install runtime packages and the shared codec libraries FFmpeg links against
 # ca-certificates is necessary for HTTPS connections (even with InsecureSkipVerify: true)
@@ -90,7 +90,7 @@ ENTRYPOINT ["/usr/bin/dumb-init", "--", "/usr/local/bin/unifi-time-machine"]
 # --- Stage 5: Vulnerability Scan ---
 # Scan the runtime filesystem with Grype; the build fails on findings at or
 # above GRYPE_FAIL_ON (negligible, low, medium, high, critical).
-FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/grype:latest@sha256:0c9e8971351cfb2fffb03a9198b062790eebd23fa6350bf40e0d4b9e58a4ecaa AS scan
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/grype:latest@sha256:721850bb014fc51f0df34a2e34345633c06d44c31ecfff706d8c2c4e84a6315b AS scan
 
 ARG GRYPE_FAIL_ON=critical
 ENV GRYPE_FAIL_ON_SEVERITY=${GRYPE_FAIL_ON} \
