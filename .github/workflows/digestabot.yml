@@ -22,6 +22,6 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Update image digests
-        uses: chainguard-dev/digestabot@33d0b78e580aa0c83fe188eb3dfad6611b662479 # v1.3.2
+        uses: chainguard-dev/digestabot@3e895adcf935bab7a21ebef6173d7cd4375822ab # v1.3.3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
