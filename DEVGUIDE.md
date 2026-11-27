@@ -42,7 +42,7 @@ chainctl auth login                  # once, as a member of the max.bern organiz
 sh scripts/chainguard-go-auth.sh     # sets GOPROXY and writes a token to ~/.netrc
 ```
 
-The token lasts about an hour; rerun the script when Go reports `401 Unauthorized`. The organization applies a 7-day cooldown to new upstream releases, so a version published in the last week returns `403 ... POLICY_COOLDOWN` until it ages in. Renovate waits the same 7 days before proposing Go updates.
+The token lasts about an hour; rerun the script when Go reports `401 Unauthorized`. The organization applies a 24-hour cooldown (`go-1d-cooldown` policy) to new upstream Go releases, so a version published in the last day returns `403 ... POLICY_COOLDOWN` until it ages in. Renovate waits the same day before proposing Go updates.
 
 Without Chainguard access, use the public proxy instead: `GOPROXY=https://proxy.golang.org,direct`.
 
@@ -94,6 +94,20 @@ docker buildx build --build-arg GOPROXY=https://proxy.golang.org,direct .
 The build pipeline runs tests (`go test -v ./...`) in a separate stage before compiling, so a failing test will abort the image build.
 
 The image is scanned with Grype before it is finalized. The build fails on any finding at or above `critical` (override with `--build-arg GRYPE_FAIL_ON=high`), and the JSON report ships in the image at `/usr/share/unifi-time-machine/grype-report.json`. Base images are pinned by digest and kept current by digestabot (`.github/workflows/digestabot.yml`).
+
+---
+
+## CI and dependency updates
+
+Workflows use [Chainguard Actions](https://edu.chainguard.dev/chainguard/actions/overview/), hardened drop-in replacements for upstream actions (`actions/checkout` → `chainguard-actions/actions-checkout`, `docker/build-push-action` → `chainguard-actions/docker-build-push-action`, and so on). Every `uses:` is pinned to a commit SHA with the version as a comment:
+
+```yaml
+- uses: chainguard-actions/actions-checkout@<sha> # v7.0.1
+```
+
+Don't reference these actions by tag or `@main`: Chainguard moves tags when it re-hardens a version, and `main` holds no action. When adding an action, use its `chainguard-actions/<owner>-<repo>` copy if one exists (`chainctl actions catalog list --upstream-owner=<owner>`), pinned the same way.
+
+Renovate keeps everything current. It updates Go modules (after the 1-day cooldown) and GitHub Actions, pins any action given by tag to its SHA, and groups Chainguard Actions updates, including re-hardened builds of the same version, into one PR. Chainguard image digests in the `Dockerfile` are updated by digestabot (`.github/workflows/digestabot.yml`).
 
 ---
 
