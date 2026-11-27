@@ -9,6 +9,11 @@
       "matchDatasources": ["docker"],
       "matchPackageNames": ["cgr.dev/chainguard/**"],
       "enabled": false
+    },
+    {
+      "description": "Chainguard Libraries for Go withholds releases for 7 days (default-7d-cooldown); wait until they can be pulled",
+      "matchManagers": ["gomod"],
+      "minimumReleaseAge": "7 days"
     }
   ]
 }

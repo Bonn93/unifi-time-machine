@@ -8,9 +8,25 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # to assume the Chainguard identity
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Set up chainctl
+        uses: chainguard-dev/setup-chainctl@bfe7503a12660737d9d66d02d2610a399d804316 # v0.6.0
+        with:
+          # gha-unifi-time-machine-go: libraries.go.pull on max.bern, this repo only
+          identity: bdabb6e199bd201d825ee8ab78ab0c9b481ac2f4/dbbe39d35ec0b279
+
+      - name: Write Chainguard Libraries credentials
+        run: |
+          token="$(chainctl auth token --audience libraries.cgr.dev)"
+          echo "::add-mask::${token}"
+          umask 077
+          printf 'machine libraries.cgr.dev\nlogin _token\npassword %s\n' "${token}" > "${RUNNER_TEMP}/netrc"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -30,5 +46,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           context: .
           push: true
+          secret-files: |
+            netrc=${{ runner.temp }}/netrc
           tags: |
             mbern/unifi-time-machine:${{ github.sha }}
