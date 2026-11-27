@@ -25,11 +25,17 @@ else
   docker buildx use mybuilder
 fi
 
+# Short-lived Chainguard Libraries for Go token, passed as a build secret
+NETRC_FILE="$(mktemp)"
+trap 'rm -f "$NETRC_FILE"' EXIT
+sh "$(dirname "$0")/scripts/chainguard-go-auth.sh" "$NETRC_FILE"
+
 # Build and push the image
 docker buildx build \
   --platform "$PLATFORMS" \
   --tag "$DOCKER_REPO/$IMAGE_NAME:$TAG" \
   --tag "$DOCKER_REPO/$IMAGE_NAME:$(date +%Y%m%d)" \
+  --secret id=netrc,src="$NETRC_FILE" \
   --push \
   .
 

@@ -1,7 +1,19 @@
 # --- Stage 1: Test Runner ---
-FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/go:latest-dev@sha256:db631352b4f461fe8f4ae8d23b9a00bbe3e77992ccc43649afe21ae9a56dac8b AS tester
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/go:latest-dev@sha256:636f4705d07bbacc1cc9c7abde2fd42caa3ec85103556a9743e2b2db0809bd3b AS tester
+
+# Go modules come from Chainguard Libraries for Go. Pass a .netrc holding a
+# short-lived token as the "netrc" build secret (see DEVGUIDE.md). Without
+# Chainguard access, build with --build-arg GOPROXY=https://proxy.golang.org,direct
+ARG GOPROXY=https://libraries.cgr.dev/go/
+ENV GOPROXY=${GOPROXY} \
+    GOMODCACHE=/go/pkg/mod
 
 WORKDIR /app
+
+# Download modules once; the builder stage reuses this cache offline
+COPY go.mod go.sum ./
+RUN --mount=type=secret,id=netrc \
+    NETRC=/run/secrets/netrc go mod download && go mod verify
 
 # Copy all source code for testing
 COPY . .
@@ -12,7 +24,12 @@ RUN go test -v ./...
 # --- Stage 2: Builder ---
 # Built natively for each target platform: the binary links SQLite via cgo,
 # which cannot cross-compile without a cross toolchain.
-FROM cgr.dev/chainguard/go:latest-dev@sha256:db631352b4f461fe8f4ae8d23b9a00bbe3e77992ccc43649afe21ae9a56dac8b AS builder
+FROM cgr.dev/chainguard/go:latest-dev@sha256:636f4705d07bbacc1cc9c7abde2fd42caa3ec85103556a9743e2b2db0809bd3b AS builder
+
+# Reuse the module cache the tester stage downloaded; no network needed
+ENV GOMODCACHE=/go/pkg/mod \
+    GOPROXY=off
+COPY --from=tester /go/pkg/mod /go/pkg/mod
 
 # Copy source from the tester stage
 COPY --from=tester /app /app
@@ -24,7 +41,7 @@ RUN CGO_ENABLED=1 go build -ldflags '-s -w -extldflags "-static"' -tags osusergo
 
 # --- Stage 3: FFmpeg Builder ---
 # Compile FFmpeg with the SVT-AV1, VP9 and x264 encoders the app uses
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:256c88bb066424045021090932d50be93c8e3f2ce3586707702a401b146f3e43 AS ffmpeg
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:4cf5932a0f95a88af352f77e4efa67480cab0e1f7a48f0eddca3cce003a7c0fb AS ffmpeg
 
 RUN apk add --no-cache \
         build-base \
@@ -41,7 +58,7 @@ COPY scripts/build-ffmpeg.sh /usr/local/bin/build-ffmpeg.sh
 RUN sh /usr/local/bin/build-ffmpeg.sh /opt/ffmpeg
 
 # --- Stage 4: Runtime Image ---
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:256c88bb066424045021090932d50be93c8e3f2ce3586707702a401b146f3e43 AS runtime
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:4cf5932a0f95a88af352f77e4efa67480cab0e1f7a48f0eddca3cce003a7c0fb AS runtime
 
 # Install runtime packages and the shared codec libraries FFmpeg links against
 # ca-certificates is necessary for HTTPS connections (even with InsecureSkipVerify: true)
@@ -90,7 +107,7 @@ ENTRYPOINT ["/usr/bin/dumb-init", "--", "/usr/local/bin/unifi-time-machine"]
 # --- Stage 5: Vulnerability Scan ---
 # Scan the runtime filesystem with Grype; the build fails on findings at or
 # above GRYPE_FAIL_ON (negligible, low, medium, high, critical).
-FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/grype:latest@sha256:0c9e8971351cfb2fffb03a9198b062790eebd23fa6350bf40e0d4b9e58a4ecaa AS scan
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/grype:latest@sha256:bd3463ffc0e47ce36f27b2c873e765aef9aafa615807813aeed5d2e8204632de AS scan
 
 ARG GRYPE_FAIL_ON=critical
 ENV GRYPE_FAIL_ON_SEVERITY=${GRYPE_FAIL_ON} \

@@ -33,6 +33,23 @@ web/                HTML templates, static assets
 
 You'll need Go 1.26+ and FFmpeg installed.
 
+### Go modules from Chainguard Libraries
+
+Go modules come from [Chainguard Libraries for Go](https://edu.chainguard.dev/chainguard/libraries/go/) (`https://libraries.cgr.dev/go/`), not proxy.golang.org. Access uses short-lived tokens, never a stored secret:
+
+```bash
+chainctl auth login                  # once, as a member of the max.bern organization
+sh scripts/chainguard-go-auth.sh     # sets GOPROXY and writes a token to ~/.netrc
+```
+
+The token lasts about an hour; rerun the script when Go reports `401 Unauthorized`. The organization applies a 7-day cooldown to new upstream releases, so a version published in the last week returns `403 ... POLICY_COOLDOWN` until it ages in. Renovate waits the same 7 days before proposing Go updates.
+
+Without Chainguard access, use the public proxy instead: `GOPROXY=https://proxy.golang.org,direct`.
+
+In GitHub Actions, the workflows assume the `gha-unifi-time-machine-go` Chainguard identity through GitHub OIDC (`chainguard-dev/setup-chainctl`), which may only pull Go libraries and only from this repository's workflows. They pass the token to `docker build` as the `netrc` build secret.
+
+### Running the server
+
 ```bash
 go mod tidy
 export UFP_API_KEY="..."
@@ -59,7 +76,14 @@ bash build.sh [tag]
 
 Tag defaults to `latest`. The script also tags with the current date (`YYYYMMDD`).
 
-Requires `docker buildx` and a configured builder instance. The script creates one named `mybuilder` if it doesn't exist.
+Requires `docker buildx` and a configured builder instance. The script creates one named `mybuilder` if it doesn't exist. It also needs a logged-in `chainctl`: it mints a short-lived Chainguard Libraries token and passes it to the build as the `netrc` secret. To build by hand:
+
+```bash
+sh scripts/chainguard-go-auth.sh /tmp/netrc
+docker buildx build --secret id=netrc,src=/tmp/netrc .
+# or, without Chainguard access:
+docker buildx build --build-arg GOPROXY=https://proxy.golang.org,direct .
+```
 
 ### Dockerfiles
 
