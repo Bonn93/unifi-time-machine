@@ -1,7 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
   ],
   "packageRules": [
     {
@@ -11,9 +12,16 @@
       "enabled": false
     },
     {
-      "description": "Chainguard Libraries for Go withholds releases for 7 days (default-7d-cooldown); wait until they can be pulled",
+      "description": "Chainguard Libraries for Go withholds releases for 1 day (go-1d-cooldown policy on max.bern); wait until they can be pulled",
       "matchManagers": ["gomod"],
-      "minimumReleaseAge": "7 days"
+      "minimumReleaseAge": "1 day"
+    },
+    {
+      "description": "Chainguard hardened actions: follow full vX.Y.Z tags only (vX.Y.Z-rN are revision tags). Chainguard moves a tag when it re-hardens a version, which arrives as a digest update",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["chainguard-actions/**"],
+      "versioning": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
+      "groupName": "Chainguard Actions"
     }
   ]
 }
