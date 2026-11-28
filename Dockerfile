@@ -1,5 +1,5 @@
 # --- Stage 1: Test Runner ---
-FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/go:latest-dev@sha256:636f4705d07bbacc1cc9c7abde2fd42caa3ec85103556a9743e2b2db0809bd3b AS tester
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/go:latest-dev@sha256:53bdff221bd160dc7570641a5d7deda0f3bd9a475655e95161c2207750401cba AS tester
 
 # Go modules come from Chainguard Libraries for Go. Pass a .netrc holding a
 # short-lived token as the "netrc" build secret (see DEVGUIDE.md). Without
@@ -24,7 +24,7 @@ RUN go test -v ./...
 # --- Stage 2: Builder ---
 # Built natively for each target platform: the binary links SQLite via cgo,
 # which cannot cross-compile without a cross toolchain.
-FROM cgr.dev/chainguard/go:latest-dev@sha256:636f4705d07bbacc1cc9c7abde2fd42caa3ec85103556a9743e2b2db0809bd3b AS builder
+FROM cgr.dev/chainguard/go:latest-dev@sha256:53bdff221bd160dc7570641a5d7deda0f3bd9a475655e95161c2207750401cba AS builder
 
 # Reuse the module cache the tester stage downloaded; no network needed
 ENV GOMODCACHE=/go/pkg/mod \
@@ -41,7 +41,7 @@ RUN CGO_ENABLED=1 go build -ldflags '-s -w -extldflags "-static"' -tags osusergo
 
 # --- Stage 3: FFmpeg Builder ---
 # Compile FFmpeg with the SVT-AV1, VP9 and x264 encoders the app uses
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:4cf5932a0f95a88af352f77e4efa67480cab0e1f7a48f0eddca3cce003a7c0fb AS ffmpeg
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:5172a213d2bba8b1c9ca11957db65562b52b0f9844583a0347318ea5fd8e3aa5 AS ffmpeg
 
 RUN apk add --no-cache \
         build-base \
@@ -58,7 +58,7 @@ COPY scripts/build-ffmpeg.sh /usr/local/bin/build-ffmpeg.sh
 RUN sh /usr/local/bin/build-ffmpeg.sh /opt/ffmpeg
 
 # --- Stage 4: Runtime Image ---
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:4cf5932a0f95a88af352f77e4efa67480cab0e1f7a48f0eddca3cce003a7c0fb AS runtime
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:5172a213d2bba8b1c9ca11957db65562b52b0f9844583a0347318ea5fd8e3aa5 AS runtime
 
 # Install runtime packages and the shared codec libraries FFmpeg links against
 # ca-certificates is necessary for HTTPS connections (even with InsecureSkipVerify: true)
@@ -107,7 +107,7 @@ ENTRYPOINT ["/usr/bin/dumb-init", "--", "/usr/local/bin/unifi-time-machine"]
 # --- Stage 5: Vulnerability Scan ---
 # Scan the runtime filesystem with Grype; the build fails on findings at or
 # above GRYPE_FAIL_ON (negligible, low, medium, high, critical).
-FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/grype:latest@sha256:bd3463ffc0e47ce36f27b2c873e765aef9aafa615807813aeed5d2e8204632de AS scan
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/grype:latest@sha256:0fec6cec3e6cb8181db002d91394325f83d8872da8a27889a62e8e8b6b17f70f AS scan
 
 ARG GRYPE_FAIL_ON=critical
 ENV GRYPE_FAIL_ON_SEVERITY=${GRYPE_FAIL_ON} \
